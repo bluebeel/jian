@@ -469,6 +469,57 @@ mod tests {
     }
 
     #[test]
+    fn image_fill_preview_externalizes_and_interns_as_a_full_source() {
+        let original = large_source("original");
+        let preview = ImageSrc::from(format!("data:image/png;base64,{}", "B".repeat(143 * 1024)));
+        let mut raw = serde_json::json!({"version": "1.0.0", "children": [{
+            "type": "rectangle", "id": "preview", "fill": [
+                {"type":"image", "url":original.as_str(), "thumbnailUrl":preview.as_str(), "nearestSampling":true},
+                {"type":"image", "url":original.as_str(), "thumbnailUrl":preview.as_str()}
+            ]
+        }]});
+        let doc: PenDocument = serde_json::from_value(raw.clone()).unwrap();
+        super::super::externalize_images(&mut raw);
+        assert!(raw["children"][0]["fill"][0]["thumbnailUrl"]
+            .as_str()
+            .unwrap()
+            .starts_with("op-image:"));
+        let mut encoded = Vec::new();
+        write_document_with_extension(
+            &mut encoded,
+            &doc,
+            &image_thumbs::capture_snapshot(),
+            "testExtension",
+            &(),
+        )
+        .unwrap();
+        let encoded = String::from_utf8(encoded).unwrap();
+        let wire: Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            wire["images"], raw["images"],
+            "streaming and Value walkers visit both sources"
+        );
+        assert_eq!(wire["images"].as_object().unwrap().len(), 2);
+        let loaded = crate::compat::load_str(&encoded).unwrap().value;
+        let PenNode::Rectangle(rectangle) = &loaded.children[0] else {
+            panic!("rectangle")
+        };
+        let fills = rectangle.container.fill.as_ref().unwrap();
+        let (crate::style::PenFill::Image(first), crate::style::PenFill::Image(second)) =
+            (&fills[0], &fills[1])
+        else {
+            panic!("images")
+        };
+        assert_eq!(first.url, original);
+        assert_eq!(first.thumbnail_url.as_ref(), Some(&preview));
+        assert!(Arc::ptr_eq(
+            &first.thumbnail_url.as_ref().unwrap().as_arc(),
+            &second.thumbnail_url.as_ref().unwrap().as_arc()
+        ));
+        assert_eq!(first.nearest_sampling, Some(true));
+    }
+
+    #[test]
     fn thumbnail_snapshot_is_fixed_before_the_save_scope_runs() {
         image_thumbs::with_test_serialized(|| {
             image_thumbs::clear_registry();

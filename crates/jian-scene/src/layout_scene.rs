@@ -662,6 +662,9 @@ pub struct SceneNode {
     /// Stable content hash for `image_src`. The canvas painter uses it
     /// as a per-frame cache key without hashing large data URLs again.
     pub image_src_id: u64,
+    pub image_thumbnail_src: Option<std::sync::Arc<str>>,
+    pub image_thumbnail_src_id: u64,
+    pub image_nearest_sampling: bool,
     /// How `image_src` is placed into `bounds`.
     pub image_fit: SceneImageFit,
     /// How an image node composites with the already-painted backdrop.
@@ -924,6 +927,9 @@ impl SceneNode {
             image_src: None,
             video: None,
             image_src_id: 0,
+            image_thumbnail_src: None,
+            image_thumbnail_src_id: 0,
+            image_nearest_sampling: false,
             image_fit: SceneImageFit::Fill,
             image_blend_mode: ImageBlendMode::Normal,
             image_transform: None,

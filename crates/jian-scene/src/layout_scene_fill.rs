@@ -25,6 +25,9 @@ pub enum SceneFillLayer {
     Image {
         src: Arc<str>,
         src_id: u64,
+        thumbnail_src: Option<Arc<str>>,
+        thumbnail_src_id: u64,
+        nearest_sampling: bool,
         fit: SceneImageFit,
         transform: Option<[f32; 6]>,
         original_size: Option<[f32; 2]>,

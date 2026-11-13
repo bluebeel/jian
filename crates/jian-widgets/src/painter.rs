@@ -2,6 +2,8 @@
 
 use crate::geometry::{fold_alpha, Color, Point2D, Rect};
 use jian_core::render::{TextAlign, TextRun};
+mod image_options;
+pub use image_options::{ImagePaintOptions, ImagePaintThumbnail};
 
 /// Text layout passed through to a backend-owned text renderer.
 #[derive(Debug, Clone)]
@@ -632,6 +634,30 @@ pub trait Painter {
             corner_radius,
             transform,
             blend_mode,
+        );
+    }
+
+    /// Image source alternatives and filtering; older backends retain their
+    /// established drawing path through this default adapter.
+    fn draw_image_with_paint_options(
+        &mut self,
+        rect: Rect,
+        image_id: u64,
+        encoded: &[u8],
+        options: &ImagePaintOptions<'_>,
+    ) {
+        self.draw_image_with_options_transform_blend_and_tile_scale(
+            rect,
+            image_id,
+            encoded,
+            options.mode,
+            options.adjustments,
+            options.opacity,
+            options.corner_radius,
+            options.transform,
+            options.blend_mode,
+            options.original_size,
+            options.tile_scale,
         );
     }
 

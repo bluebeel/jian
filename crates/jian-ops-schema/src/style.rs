@@ -251,6 +251,14 @@ pub struct ImageFillBody {
     #[schemars(with = "String")]
     #[cfg_attr(feature = "export-ts", ts(as = "String"))]
     pub url: crate::node::ImageSrc,
+    /// Optional display preview. The original source remains available in `url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    #[cfg_attr(feature = "export-ts", ts(as = "Option<String>", optional = nullable))]
+    pub thumbnail_url: Option<crate::node::ImageSrc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub nearest_sampling: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<ImageFillMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -621,7 +629,26 @@ mod tests {
             r#"{"type":"image","url":"data:image/png;base64,...","mode":"tile"}"#,
         )
         .unwrap();
-        assert!(matches!(old, PenFill::Image(image) if image.tile_scale.is_none()));
+        assert!(
+            matches!(old, PenFill::Image(image) if image.tile_scale.is_none()
+            && image.thumbnail_url.is_none() && image.nearest_sampling.is_none())
+        );
+    }
+
+    #[test]
+    fn image_fill_preview_sources_are_optional_strings() {
+        let json = r#"{"type":"image","url":"original.png","thumbnailUrl":"preview.png","nearestSampling":true}"#;
+        let fill: PenFill = serde_json::from_str(json).unwrap();
+        let PenFill::Image(image) = &fill else {
+            panic!("image")
+        };
+        assert_eq!(image.url, "original.png");
+        assert_eq!(image.thumbnail_url.as_deref(), Some("preview.png"));
+        assert_eq!(image.nearest_sampling, Some(true));
+        assert_eq!(
+            serde_json::to_value(fill).unwrap(),
+            serde_json::from_str::<serde_json::Value>(json).unwrap()
+        );
     }
 
     #[test]

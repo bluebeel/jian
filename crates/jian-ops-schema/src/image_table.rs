@@ -68,7 +68,7 @@ pub fn visit_image_src_strings_mut(root: &mut Value, f: &mut impl FnMut(&mut Str
 }
 
 /// Visit every image-source string slot in `root`'s NODE TREE:
-/// `ImageNode.src` and image-fill `url`s — direct `fill` arrays,
+/// `ImageNode.src` and image-fill `url`/`thumbnailUrl`s — direct `fill` arrays,
 /// `stroke.fill`, and widget-state override (`states.*`) fills —
 /// across `children` / `pages[].children` and nested `children`.
 ///
@@ -126,7 +126,7 @@ fn visit_image_strings_mut(root: &mut Value, f: &mut impl FnMut(&mut String)) {
     }
 }
 
-/// Visit the `url` of every image fill in a `fill` array.
+/// Visit both typed image sources of every image fill in a `fill` array.
 fn visit_fill_array_mut(fill: &mut Value, f: &mut impl FnMut(&mut String)) {
     let Value::Array(items) = fill else {
         return;
@@ -138,8 +138,10 @@ fn visit_fill_array_mut(fill: &mut Value, f: &mut impl FnMut(&mut String)) {
         if !is_image_typed(item) {
             continue;
         }
-        if let Some(Value::String(url)) = item.get_mut("url") {
-            f(url);
+        for key in ["url", "thumbnailUrl"] {
+            if let Some(Value::String(url)) = item.get_mut(key) {
+                f(url);
+            }
         }
     }
 }
@@ -347,8 +349,10 @@ fn visit_fill_array_ref(fill: &Value, f: &mut impl FnMut(&str)) {
         if !is_image_typed(item) {
             continue;
         }
-        if let Some(Value::String(url)) = item.get("url") {
-            f(url);
+        for key in ["url", "thumbnailUrl"] {
+            if let Some(Value::String(url)) = item.get(key) {
+                f(url);
+            }
         }
     }
 }

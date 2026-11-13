@@ -166,6 +166,9 @@ fn visit_fills(fills: Option<&[PenFill]>, visit: &mut dyn FnMut(&crate::node::Im
     for fill in fills.into_iter().flatten() {
         if let PenFill::Image(image) = fill {
             visit(&image.url);
+            if let Some(thumbnail) = &image.thumbnail_url {
+                visit(thumbnail);
+            }
         }
     }
 }
