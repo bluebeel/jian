@@ -84,6 +84,9 @@ pub struct TextNode {
     /// Explicit OpenType kerning; absence preserves the renderer default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_kerning: Option<bool>,
+    /// Explicit OpenType feature tags, for example `salt: 1` or `liga: 0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_features: Option<std::collections::BTreeMap<String, u32>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_style: Option<FontStyleKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

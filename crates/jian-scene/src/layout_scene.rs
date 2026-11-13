@@ -598,6 +598,7 @@ pub struct SceneNode {
     pub font_weight: u16,
     /// Explicit OpenType kerning; absent retains legacy text dispatch.
     pub font_kerning: Option<bool>,
+    pub font_features: std::collections::BTreeMap<String, u32>,
     /// Node-level italic (`fontStyle: italic`). Per-run overrides ride
     /// in `text_runs`.
     pub italic: bool,
@@ -900,6 +901,7 @@ impl SceneNode {
             font_size: 0.0,
             font_weight: 0,
             font_kerning: None,
+            font_features: Default::default(),
             italic: false,
             underline: false,
             strikethrough: false,

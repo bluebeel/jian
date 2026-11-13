@@ -10,6 +10,7 @@ pub struct TextLayout {
     italic: bool,
     kerning: Option<bool>,
     letter_spacing: f32,
+    font_features: std::collections::BTreeMap<String, u32>,
 }
 
 /// Inputs used to locate the first alphabetic baseline inside a text line.
@@ -112,6 +113,7 @@ impl TextLayout {
             italic: false,
             kerning: None,
             letter_spacing: 0.0,
+            font_features: Default::default(),
         }
     }
 
@@ -153,6 +155,18 @@ impl TextLayout {
         self.letter_spacing
     }
 
+    pub fn with_font_features(
+        mut self,
+        features: &std::collections::BTreeMap<String, u32>,
+    ) -> Self {
+        self.font_features = features.clone();
+        self
+    }
+
+    pub fn font_features(&self) -> &std::collections::BTreeMap<String, u32> {
+        &self.font_features
+    }
+
     pub fn translated(&self, offset: Point2D) -> Self {
         let runs = self
             .runs
@@ -169,6 +183,7 @@ impl TextLayout {
             italic: self.italic,
             kerning: self.kerning,
             letter_spacing: self.letter_spacing,
+            font_features: self.font_features.clone(),
         }
     }
 }
@@ -828,6 +843,7 @@ pub trait Painter {
         italic: bool,
         _kerning: Option<bool>,
         letter_spacing: f32,
+        _font_features: &std::collections::BTreeMap<String, u32>,
     ) -> f32 {
         self.measure_text_family_styled(text, font_size, family, weight, italic)
             + text.chars().count().saturating_sub(1) as f32 * letter_spacing

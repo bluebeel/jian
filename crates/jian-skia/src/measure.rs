@@ -235,6 +235,13 @@ impl SkiaMeasure {
             };
             ts.set_font_style(FontStyle::new(weight, FONT_WIDTH, slant));
             crate::font_variations::set_paragraph_weight(&mut ts, run.font_weight);
+            if let Some(features) = run.font_features {
+                for (tag, value) in features {
+                    if tag.len() == 4 && tag.is_ascii() {
+                        ts.add_font_feature(tag, *value as i32);
+                    }
+                }
+            }
             if run.letter_spacing != 0.0 {
                 ts.set_letter_spacing(run.letter_spacing);
             }
@@ -268,6 +275,13 @@ impl SkiaMeasure {
             // Natural extent: `max_intrinsic_width` is the unwrapped
             // single-line width, but the direct resolver path also
             // applies native synthetic-bold width compensation.
+            None if req.runs.iter().any(|run| {
+                run.font_features
+                    .is_some_and(|features| !features.is_empty())
+            }) =>
+            {
+                paragraph.max_intrinsic_width()
+            }
             None => self.resolved_natural_width(req),
         };
         let line_count = paragraph.line_number().max(1) as u16;
@@ -301,6 +315,7 @@ mod tests {
 
     fn run<'a>(text: &'a str, weight: u16, size: f32) -> StyledRun<'a> {
         StyledRun {
+            font_features: None,
             text,
             font_family: None,
             font_size: size,
@@ -533,6 +548,7 @@ mod tests {
             },
         ] {
             let runs = [StyledRun {
+                font_features: None,
                 text: case.text,
                 font_family: None,
                 font_size: case.size,

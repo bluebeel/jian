@@ -85,6 +85,7 @@ pub struct OwnedRun {
     pub font_weight: u16,
     pub font_style: FontStyleKind,
     pub letter_spacing: f32,
+    pub font_features: std::collections::BTreeMap<String, u32>,
 }
 
 const INPUT_PAD_X: f32 = 8.0;
@@ -99,6 +100,7 @@ impl OwnedRun {
             font_weight: self.font_weight,
             font_style: self.font_style,
             letter_spacing: self.letter_spacing,
+            font_features: Some(&self.font_features),
         }
     }
 }
@@ -517,6 +519,7 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
                 font_weight: 400,
                 font_style: FontStyleKind::Normal,
                 letter_spacing: 0.0,
+                font_features: Default::default(),
             }],
             line_height: 0.0,
             growth: TextGrowth::Auto,
@@ -537,6 +540,7 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
                 font_weight: wm::WIDGET_LABEL_FONT_WEIGHT,
                 font_style: FontStyleKind::Normal,
                 letter_spacing: 0.0,
+                font_features: Default::default(),
             }],
             // The adjacent label painter uses a 14px one-line box rather
             // than input/body text's 1.3x default leading.
@@ -598,6 +602,14 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
     let node_style = resolve_style(t.font_style.as_ref());
     let node_family = t.font_family.clone();
     let node_letter_spacing = t.letter_spacing.map(|v| v as f32).unwrap_or(0.0);
+    let mut node_features = t.font_features.clone().unwrap_or_default();
+    if !node_features.is_empty() {
+        if t.font_kerning == Some(false) {
+            node_features.insert("kern".into(), 0);
+        } else if t.font_kerning == Some(true) {
+            node_features.entry("kern".into()).or_insert(1);
+        }
+    }
 
     let runs: Vec<OwnedRun> = match &t.content {
         TextContent::Plain(s) => {
@@ -611,6 +623,7 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
                 font_weight: node_weight,
                 font_style: node_style,
                 letter_spacing: node_letter_spacing,
+                font_features: node_features.clone(),
             }]
         }
         TextContent::Styled(segs) => {
@@ -637,6 +650,7 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
                         None => node_style,
                     },
                     letter_spacing: node_letter_spacing,
+                    font_features: node_features.clone(),
                 })
                 .collect();
             if resolved.is_empty() {
