@@ -96,13 +96,15 @@ impl NodeKind {
 
 /// Shadow effect — offset + blur + colour, doc-px units. Mirrors the
 /// TS `PenEffect` shadow variant (`offsetX` / `offsetY` / `blur` /
-/// `color` / `inner`). An outer shadow paints behind the node's fill;
+/// `spread` / `color` / `inner`). An outer shadow paints behind the node's fill;
 /// an `inner` shadow paints inset, clipped to the node silhouette.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DropShadow {
     pub offset_x: f32,
     pub offset_y: f32,
     pub blur: f32,
+    /// Signed silhouette expansion in document pixels before blur.
+    pub spread: f32,
     pub color: Color,
     /// `true` = inset (inner) shadow; `false` = outer drop shadow.
     pub inner: bool,
