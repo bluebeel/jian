@@ -9,6 +9,7 @@ pub use image_options::{ImagePaintOptions, ImagePaintThumbnail};
 #[derive(Debug, Clone)]
 pub struct TextLayout {
     runs: Vec<TextRun>,
+    source_color: Option<Color>,
     italic: bool,
     kerning: Option<bool>,
     letter_spacing: f32,
@@ -112,11 +113,23 @@ impl TextLayout {
         };
         Self {
             runs: vec![run],
+            source_color: None,
             italic: false,
             kerning: None,
             letter_spacing: 0.0,
             font_features: Default::default(),
         }
+    }
+
+    /// Original float paint for hosts whose correlated source stage must
+    /// avoid narrowing a color through the legacy packed TextRun contract.
+    pub fn with_source_color(mut self, color: Color) -> Self {
+        self.source_color = Some(color);
+        self
+    }
+
+    pub fn source_color(&self) -> Option<Color> {
+        self.source_color
     }
 
     pub fn runs(&self) -> &[TextRun] {
@@ -182,6 +195,7 @@ impl TextLayout {
             .collect();
         Self {
             runs,
+            source_color: self.source_color,
             italic: self.italic,
             kerning: self.kerning,
             letter_spacing: self.letter_spacing,

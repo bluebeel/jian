@@ -30,6 +30,7 @@ pub enum SceneFillLayer {
         nearest_sampling: bool,
         fit: SceneImageFit,
         transform: Option<[f32; 6]>,
+        rotation_degrees: Option<f32>,
         original_size: Option<[f32; 2]>,
         tile_scale: f32,
         adjustments: ImageAdjustments,

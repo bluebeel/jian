@@ -104,7 +104,11 @@ impl RenderBackend for SkiaBackend {
             match cmd {
                 Cmd::PushClip(r) => {
                     canvas.save();
-                    canvas.clip_rect(to_sk_rect(r), None, true);
+                    canvas.clip_rect(
+                        to_sk_rect(r),
+                        None,
+                        crate::raster_sampling::geometry_antialias(),
+                    );
                 }
                 Cmd::PushTransform(m) => {
                     canvas.save();
@@ -115,14 +119,15 @@ impl RenderBackend for SkiaBackend {
                 }
                 Cmd::PushLayer { bounds, filter } => {
                     let sk_bounds = to_sk_rect(bounds);
-                    let paint = filter.map(|f| {
-                        let mut p = SkPaint::default();
-                        p.set_image_filter(f);
-                        p
-                    });
+                    let has_filter = filter.is_some();
+                    let mut paint = SkPaint::default();
+                    if let Some(filter) = filter {
+                        paint.set_image_filter(filter);
+                    }
+                    crate::raster_sampling::configure_paint(&mut paint);
                     let mut rec = SaveLayerRec::default().bounds(&sk_bounds);
-                    if let Some(ref p) = paint {
-                        rec = rec.paint(p);
+                    if has_filter || crate::raster_sampling::is_point_sampling() {
+                        rec = rec.paint(&paint);
                     }
                     canvas.save_layer(&rec);
                 }
@@ -224,7 +229,7 @@ fn draw_canvas(
             if let Some(fill_color) = paint.fill {
                 let mut p = SkPaint::new(to_sk_color(fill_color), None);
                 p.set_alpha_f(combined_alpha(fill_color, paint.opacity));
-                p.set_anti_alias(true);
+                crate::raster_sampling::configure_geometry(&mut p);
                 p.set_style(PaintStyle::Fill);
                 canvas.draw_path(&path, &p);
             }
@@ -232,7 +237,7 @@ fn draw_canvas(
                 let mut p = SkPaint::new(to_sk_color(stroke.color), None);
                 p.set_style(PaintStyle::Stroke);
                 p.set_stroke_width(stroke.width);
-                p.set_anti_alias(true);
+                crate::raster_sampling::configure_geometry(&mut p);
                 p.set_alpha_f(combined_alpha(stroke.color, paint.opacity));
                 canvas.draw_path(&path, &p);
             }
@@ -307,7 +312,7 @@ fn draw_text_singleline(canvas: &skia_safe::Canvas, run: &jian_core::render::Tex
     use skia_safe::FontStyle;
 
     let mut p = SkPaint::new(to_sk_color(run.color), None);
-    p.set_anti_alias(true);
+    crate::raster_sampling::configure_geometry(&mut p);
 
     let weight = Weight::from(run.font_weight as i32);
     let style = FontStyle::new(
@@ -475,7 +480,7 @@ fn draw_icon(canvas: &skia_safe::Canvas, r: Rect, name: &str, color: jian_core::
         // Unknown glyph — fall back to a small filled square so the
         // missing icon is visible for debugging.
         let mut p = SkPaint::new(to_sk_color(color), None);
-        p.set_anti_alias(true);
+        crate::raster_sampling::configure_geometry(&mut p);
         p.set_style(PaintStyle::Fill);
         canvas.draw_rect(to_sk_rect(r), &p);
         return;
@@ -495,7 +500,7 @@ fn draw_icon(canvas: &skia_safe::Canvas, r: Rect, name: &str, color: jian_core::
     let path = path.with_transform(&m);
 
     let mut sp = SkPaint::new(to_sk_color(color), None);
-    sp.set_anti_alias(true);
+    crate::raster_sampling::configure_geometry(&mut sp);
     sp.set_style(PaintStyle::Stroke);
     // Lucide's native stroke-width is 2 at 24px. Normalise so the
     // visual weight is consistent across icon sizes.
@@ -549,7 +554,7 @@ fn draw_linear_gradient_rect(
         None,
     );
     let mut paint = SkPaint::default();
-    paint.set_anti_alias(true);
+    crate::raster_sampling::configure_geometry(&mut paint);
     paint.set_style(PaintStyle::Fill);
     paint.set_alpha_f(g.opacity);
     if let Some(s) = shader {
@@ -575,7 +580,7 @@ fn draw_linear_gradient_rect(
         let mut p = SkPaint::new(to_sk_color(stroke.color), None);
         p.set_style(PaintStyle::Stroke);
         p.set_stroke_width(stroke.width);
-        p.set_anti_alias(true);
+        crate::raster_sampling::configure_geometry(&mut p);
         if is_rounded {
             let sk_rect = to_sk_rect(rect);
             let radii_arr = [
@@ -603,7 +608,7 @@ fn draw_image(
     let dst_rect = to_sk_rect(dst);
     if let Some(img) = cache.get_or_decode(source) {
         let mut p = SkPaint::default();
-        p.set_anti_alias(true);
+        crate::raster_sampling::configure_geometry(&mut p);
         p.set_alpha_f(opacity);
         // object-fit: cover — parity with TS `node-renderer.ts` drawImage,
         // whose default (`objectFit ?? 'fill'`) branch scales by `Math.max`.
@@ -641,7 +646,7 @@ fn draw_image(
         // Decode failed (or remote URL with no resolver) — fall back to
         // a grey placeholder so the slot is visible at the right size.
         let mut p = SkPaint::new(Color4f::new(0.5, 0.5, 0.5, opacity), None);
-        p.set_anti_alias(true);
+        crate::raster_sampling::configure_geometry(&mut p);
         canvas.draw_rect(dst_rect, &p);
     }
 }
@@ -670,7 +675,7 @@ fn draw_radial_gradient_rect(
     let shader: Option<Shader> =
         gradient::shaders::radial_gradient((SkPoint::new(cx, cy), r.max(0.0)), &gradient_obj, None);
     let mut paint = SkPaint::default();
-    paint.set_anti_alias(true);
+    crate::raster_sampling::configure_geometry(&mut paint);
     paint.set_style(PaintStyle::Fill);
     paint.set_alpha_f(g.opacity);
     if let Some(s) = shader {
@@ -696,7 +701,7 @@ fn draw_radial_gradient_rect(
         let mut p = SkPaint::new(to_sk_color(stroke.color), None);
         p.set_style(PaintStyle::Stroke);
         p.set_stroke_width(stroke.width);
-        p.set_anti_alias(true);
+        crate::raster_sampling::configure_geometry(&mut p);
         if is_rounded {
             let sk_rect = to_sk_rect(rect);
             let radii_arr = [
@@ -783,9 +788,17 @@ fn draw_mesh_gradient_rect(
             SkPoint::new(radii.bl, radii.bl),
         ];
         let rrect = RRect::new_rect_radii(sk_rect, &radii_arr);
-        canvas.clip_rrect(rrect, None, Some(true));
+        canvas.clip_rrect(
+            rrect,
+            None,
+            Some(crate::raster_sampling::geometry_antialias()),
+        );
     } else {
-        canvas.clip_rect(to_sk_rect(rect), None, Some(true));
+        canvas.clip_rect(
+            to_sk_rect(rect),
+            None,
+            Some(crate::raster_sampling::geometry_antialias()),
+        );
     }
 
     // `draw_vertices` with no shader combines each interpolated vertex
@@ -794,7 +807,7 @@ fn draw_mesh_gradient_rect(
     // to pass the vertex colours through unchanged; `opacity` rides in the
     // paint alpha.
     let mut paint = SkPaint::default();
-    paint.set_anti_alias(true);
+    crate::raster_sampling::configure_geometry(&mut paint);
     paint.set_color4f(Color4f::new(1.0, 1.0, 1.0, g.opacity), None);
     canvas.draw_vertices(&vertices, SkBlendMode::Modulate, &paint);
     canvas.restore_to_count(restore_count);
@@ -803,7 +816,7 @@ fn draw_mesh_gradient_rect(
         let mut p = SkPaint::new(to_sk_color(stroke.color), None);
         p.set_style(PaintStyle::Stroke);
         p.set_stroke_width(stroke.width);
-        p.set_anti_alias(true);
+        crate::raster_sampling::configure_geometry(&mut p);
         if is_rounded {
             let sk_rect = to_sk_rect(rect);
             let radii_arr = [
@@ -844,7 +857,7 @@ fn draw_shader_rect(
 
     let shader = build_shader(shader_cache, spec);
     let mut paint = SkPaint::default();
-    paint.set_anti_alias(true);
+    crate::raster_sampling::configure_geometry(&mut paint);
     paint.set_style(PaintStyle::Fill);
     paint.set_alpha_f(spec.opacity.clamp(0.0, 1.0));
     match shader {
@@ -869,7 +882,7 @@ fn draw_shader_rect(
         let mut p = SkPaint::new(to_sk_color(stroke.color), None);
         p.set_style(PaintStyle::Stroke);
         p.set_stroke_width(stroke.width);
-        p.set_anti_alias(true);
+        crate::raster_sampling::configure_geometry(&mut p);
         if is_rounded {
             let rrect = RRect::new_rect_radii(to_sk_rect(rect), &radii_arr);
             canvas.draw_rrect(rrect, &p);
@@ -910,7 +923,7 @@ fn draw_shadowed_rect(
     // (dx, dy). The foreground fill lands via a subsequent draw-op.
     let c4 = to_sk_color(shadow.color);
     let mut paint = SkPaint::new(c4, None);
-    paint.set_anti_alias(true);
+    crate::raster_sampling::configure_geometry(&mut paint);
     paint.set_style(PaintStyle::Fill);
     // Skia's blur filter uses sigma; CSS-ish `blur` is ~= sigma * 2.
     let sigma = (shadow.blur * 0.5).max(0.0);
@@ -942,7 +955,7 @@ fn draw_rect(canvas: &skia_safe::Canvas, r: Rect, paint: &Paint) {
     if let Some(fill) = paint.fill {
         let mut p = SkPaint::new(to_sk_color(fill), None);
         p.set_alpha_f(combined_alpha(fill, paint.opacity));
-        p.set_anti_alias(true);
+        crate::raster_sampling::configure_geometry(&mut p);
         p.set_style(PaintStyle::Fill);
         canvas.draw_rect(rr, &p);
     }
@@ -951,7 +964,7 @@ fn draw_rect(canvas: &skia_safe::Canvas, r: Rect, paint: &Paint) {
         p.set_style(PaintStyle::Stroke);
         p.set_stroke_width(stroke.width);
         p.set_alpha_f(combined_alpha(stroke.color, paint.opacity));
-        p.set_anti_alias(true);
+        crate::raster_sampling::configure_geometry(&mut p);
         canvas.draw_rect(rr, &p);
     }
 }
@@ -968,7 +981,7 @@ fn draw_rrect(canvas: &skia_safe::Canvas, r: Rect, radii: BorderRadii, paint: &P
     if let Some(fill) = paint.fill {
         let mut p = SkPaint::new(to_sk_color(fill), None);
         p.set_alpha_f(combined_alpha(fill, paint.opacity));
-        p.set_anti_alias(true);
+        crate::raster_sampling::configure_geometry(&mut p);
         p.set_style(PaintStyle::Fill);
         canvas.draw_rrect(rrect, &p);
     }
@@ -977,7 +990,7 @@ fn draw_rrect(canvas: &skia_safe::Canvas, r: Rect, radii: BorderRadii, paint: &P
         p.set_style(PaintStyle::Stroke);
         p.set_stroke_width(stroke.width);
         p.set_alpha_f(combined_alpha(stroke.color, paint.opacity));
-        p.set_anti_alias(true);
+        crate::raster_sampling::configure_geometry(&mut p);
         canvas.draw_rrect(rrect, &p);
     }
 }

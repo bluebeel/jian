@@ -265,6 +265,11 @@ pub struct ImageFillBody {
     pub original_size: Option<ImageOriginalSize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<ImageTransform>,
+    /// Authored image-fill rotation in degrees; complete turns retain their
+    /// floating-point source-fit arithmetic rather than being reduced modulo360.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub rotation: Option<f32>,
     /// Figma TILE paint scale. A value of `1.0` draws each source bitmap pixel
     /// as one document pixel; omitted values retain that default. Other image
     /// placement modes ignore this field.

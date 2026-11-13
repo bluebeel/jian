@@ -675,6 +675,8 @@ pub struct SceneNode {
     /// `(x, y)` to image UV as `(m00*x + m01*y + m02,
     /// m10*x + m11*y + m12)`. `None` keeps the placement-mode default.
     pub image_transform: Option<[f32; 6]>,
+    /// Authored image-fill rotation, preserved in degrees for source fitting.
+    pub image_rotation_degrees: Option<f32>,
     /// Authored source dimensions used to keep TILE frequency stable when the
     /// backend holds a downsampled raster. Invalid/absent values use the raster.
     pub image_original_size: Option<[f32; 2]>,
@@ -933,6 +935,7 @@ impl SceneNode {
             image_fit: SceneImageFit::Fill,
             image_blend_mode: ImageBlendMode::Normal,
             image_transform: None,
+            image_rotation_degrees: None,
             image_original_size: None,
             image_tile_scale: 1.0,
             image_adjustments: ImageAdjustments::default(),
