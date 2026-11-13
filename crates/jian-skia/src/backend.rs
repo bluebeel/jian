@@ -453,6 +453,7 @@ fn draw_text_paragraph(canvas: &skia_safe::Canvas, run: &jian_core::render::Text
         skia_safe::font_style::Slant::Upright,
     );
     text_style.set_font_style(fs);
+    crate::font_variations::set_paragraph_weight(&mut text_style, run.font_weight);
     style.set_text_style(&text_style);
 
     let mut builder = ParagraphBuilder::new(&style, collection);

@@ -55,6 +55,7 @@ pub struct ResolvedTypeface {
 #[derive(Default)]
 struct FontResolverCache {
     chars: HashMap<FontKey, Option<ResolvedTypeface>>,
+    weights: HashMap<(u32, u16), Typeface>,
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -160,7 +161,7 @@ impl FontResolver {
         *self.bundled_family_names.borrow_mut() = bundled_family_names;
         *self.imported_mgr.borrow_mut() = imported_mgr;
         *self.imported_family_names.borrow_mut() = imported_family_names;
-        self.cache.borrow_mut().chars.clear();
+        *self.cache.borrow_mut() = FontResolverCache::default();
         self.built_generation.set(current);
     }
 
@@ -323,6 +324,19 @@ impl FontResolver {
         self.cache.borrow().chars.len()
     }
 
+    fn resolved(&self, typeface: Typeface, weight: u16, italic: bool) -> ResolvedTypeface {
+        let key = (typeface.unique_id(), weight);
+        // Share an instance across codepoints so segmentation remains by face,
+        // not one freshly cloned variable typeface per character.
+        let mut cache = self.cache.borrow_mut();
+        let typeface = cache
+            .weights
+            .entry(key)
+            .or_insert_with(|| crate::font_variations::typeface_at_weight(typeface, weight))
+            .clone();
+        resolved(typeface, weight, italic)
+    }
+
     fn resolve_uncached(
         &self,
         families: &[String],
@@ -342,7 +356,7 @@ impl FontResolver {
                 if let Some(typeface) =
                     family_typeface_covering(imported, &imported_names, family, style, c)
                 {
-                    return Some(resolved(typeface, weight, italic));
+                    return Some(self.resolved(typeface, weight, italic));
                 }
             }
             if let Some(typeface) = family_typeface_covering(
@@ -352,13 +366,13 @@ impl FontResolver {
                 style,
                 c,
             ) {
-                return Some(resolved(typeface, weight, italic));
+                return Some(self.resolved(typeface, weight, italic));
             }
             if let Some(bundled) = &*bundled_mgr {
                 if let Some(typeface) =
                     family_typeface_covering(bundled, &bundled_names, family, style, c)
                 {
-                    return Some(resolved(typeface, weight, italic));
+                    return Some(self.resolved(typeface, weight, italic));
                 }
             }
         }
@@ -368,7 +382,7 @@ impl FontResolver {
             .filter(|typeface| covers(typeface, c))
             .cloned()
         {
-            return Some(resolved(typeface, weight, italic));
+            return Some(self.resolved(typeface, weight, italic));
         }
         if let Some(typeface) =
             self.system_mgr
@@ -385,7 +399,7 @@ impl FontResolver {
                 .match_family_style(&family, style)
                 .filter(|candidate| covers(candidate, c))
                 .unwrap_or(typeface);
-            return Some(resolved(styled, weight, italic));
+            return Some(self.resolved(styled, weight, italic));
         }
         // Last resort: scan every imported family for glyph coverage. On
         // platforms without a character-aware system font manager (OHOS ships
@@ -398,7 +412,7 @@ impl FontResolver {
                 if let Some(typeface) =
                     family_typeface_covering(imported, &imported_names, family, style, c)
                 {
-                    return Some(resolved(typeface, weight, italic));
+                    return Some(self.resolved(typeface, weight, italic));
                 }
             }
         }

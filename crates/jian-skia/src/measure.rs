@@ -234,6 +234,7 @@ impl SkiaMeasure {
                 FontStyleKind::Normal => Slant::Upright,
             };
             ts.set_font_style(FontStyle::new(weight, FONT_WIDTH, slant));
+            crate::font_variations::set_paragraph_weight(&mut ts, run.font_weight);
             if run.letter_spacing != 0.0 {
                 ts.set_letter_spacing(run.letter_spacing);
             }
