@@ -603,12 +603,14 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
     let node_family = t.font_family.clone();
     let node_letter_spacing = t.letter_spacing.map(|v| v as f32).unwrap_or(0.0);
     let mut node_features = t.font_features.clone().unwrap_or_default();
-    if !node_features.is_empty() {
-        if t.font_kerning == Some(false) {
-            node_features.insert("kern".into(), 0);
-        } else if t.font_kerning == Some(true) {
-            node_features.entry("kern".into()).or_insert(1);
-        }
+    if t.font_kerning == Some(false) {
+        node_features.insert("kern".into(), 0);
+    } else if t.font_kerning == Some(true) {
+        node_features.entry("kern".into()).or_insert(1);
+    }
+    if t.font_kerning.is_some() {
+        node_features.entry("liga".into()).or_insert(0);
+        node_features.entry("calt".into()).or_insert(0);
     }
 
     let runs: Vec<OwnedRun> = match &t.content {

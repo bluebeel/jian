@@ -31,8 +31,9 @@
 //! let png = surface.encode_png().unwrap();
 //! ```
 
-pub mod backend;
 #[cfg(feature = "textlayout")]
+pub mod advance_grid;
+pub mod backend;
 pub mod baseline;
 #[cfg(feature = "textlayout")]
 pub mod bundled_fonts;

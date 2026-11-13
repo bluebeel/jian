@@ -284,6 +284,49 @@ impl SkiaMeasure {
             }
             None => self.resolved_natural_width(req),
         };
+        let width = if req.runs.iter().all(|run| {
+            run.font_features
+                .is_some_and(|features| !features.is_empty())
+                && crate::advance_grid::supports_text(run.text)
+        }) {
+            let mut corrections = std::collections::BTreeMap::<usize, f32>::new();
+            paragraph.visit(|line, info| {
+                if let Some(info) = info {
+                    if let Some(adjusted) = crate::advance_grid::adjust_glyph_run(
+                        info.font(),
+                        info.glyphs(),
+                        info.positions(),
+                        info.utf8_starts(),
+                        info.advance_x(),
+                    ) {
+                        *corrections.entry(line).or_default() += adjusted.advance_correction;
+                    }
+                }
+            });
+            let size = req.runs.first().map_or(0.0, |run| run.font_size);
+            let same_size = req.runs.iter().all(|run| run.font_size == size);
+            let snap = |value| {
+                if same_size {
+                    crate::advance_grid::quantize_advance(value, size)
+                } else {
+                    value
+                }
+            };
+            if req.max_width.is_none() && !has_literal_newline(req) {
+                snap(width + corrections.get(&0).copied().unwrap_or(0.0))
+            } else {
+                paragraph
+                    .get_line_metrics()
+                    .iter()
+                    .enumerate()
+                    .map(|(line, metrics)| {
+                        snap(metrics.width as f32 + corrections.get(&line).copied().unwrap_or(0.0))
+                    })
+                    .fold(0.0, f32::max)
+            }
+        } else {
+            width
+        };
         let line_count = paragraph.line_number().max(1) as u16;
         // The canvas painter advances authored line boxes by the exact
         // `font_size * line_height` value. Paragraph rounds fractional line
