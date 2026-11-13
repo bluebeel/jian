@@ -9,6 +9,7 @@ pub struct TextLayout {
     runs: Vec<TextRun>,
     italic: bool,
     kerning: Option<bool>,
+    letter_spacing: f32,
 }
 
 /// Inputs used to locate the first alphabetic baseline inside a text line.
@@ -110,6 +111,7 @@ impl TextLayout {
             runs: vec![run],
             italic: false,
             kerning: None,
+            letter_spacing: 0.0,
         }
     }
 
@@ -142,6 +144,15 @@ impl TextLayout {
         self.kerning
     }
 
+    pub fn with_letter_spacing(mut self, spacing: f32) -> Self {
+        self.letter_spacing = spacing;
+        self
+    }
+
+    pub fn letter_spacing(&self) -> f32 {
+        self.letter_spacing
+    }
+
     pub fn translated(&self, offset: Point2D) -> Self {
         let runs = self
             .runs
@@ -157,6 +168,7 @@ impl TextLayout {
             runs,
             italic: self.italic,
             kerning: self.kerning,
+            letter_spacing: self.letter_spacing,
         }
     }
 }
@@ -815,8 +827,10 @@ pub trait Painter {
         weight: u16,
         italic: bool,
         _kerning: Option<bool>,
+        letter_spacing: f32,
     ) -> f32 {
         self.measure_text_family_styled(text, font_size, family, weight, italic)
+            + text.chars().count().saturating_sub(1) as f32 * letter_spacing
     }
 
     fn measure_text_family_styled(
