@@ -596,6 +596,8 @@ pub struct SceneNode {
     pub font_size: f32,
     /// CSS-style font weight (100-900). `0` = default (400).
     pub font_weight: u16,
+    /// Explicit OpenType kerning; absent retains legacy text dispatch.
+    pub font_kerning: Option<bool>,
     /// Node-level italic (`fontStyle: italic`). Per-run overrides ride
     /// in `text_runs`.
     pub italic: bool,
@@ -897,6 +899,7 @@ impl SceneNode {
             font_family: String::new(),
             font_size: 0.0,
             font_weight: 0,
+            font_kerning: None,
             italic: false,
             underline: false,
             strikethrough: false,

@@ -81,6 +81,9 @@ pub struct TextNode {
     pub font_size: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_weight: Option<FontWeight>,
+    /// Explicit OpenType kerning; absence preserves the renderer default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_kerning: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_style: Option<FontStyleKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

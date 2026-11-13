@@ -8,6 +8,7 @@ use jian_core::render::{TextAlign, TextRun};
 pub struct TextLayout {
     runs: Vec<TextRun>,
     italic: bool,
+    kerning: Option<bool>,
 }
 
 /// Inputs used to locate the first alphabetic baseline inside a text line.
@@ -108,6 +109,7 @@ impl TextLayout {
         Self {
             runs: vec![run],
             italic: false,
+            kerning: None,
         }
     }
 
@@ -131,6 +133,15 @@ impl TextLayout {
         self.italic
     }
 
+    pub fn with_kerning(mut self, kerning: Option<bool>) -> Self {
+        self.kerning = kerning;
+        self
+    }
+
+    pub fn kerning(&self) -> Option<bool> {
+        self.kerning
+    }
+
     pub fn translated(&self, offset: Point2D) -> Self {
         let runs = self
             .runs
@@ -145,6 +156,7 @@ impl TextLayout {
         Self {
             runs,
             italic: self.italic,
+            kerning: self.kerning,
         }
     }
 }
@@ -791,6 +803,20 @@ pub trait Painter {
     /// (native skia) override this to measure with `family`.
     fn measure_text_family(&mut self, text: &str, font_size: f32, _family: &str) -> f32 {
         self.measure_text(text, font_size)
+    }
+
+    /// Measure with the same explicit kerning used by a document text run.
+    #[allow(clippy::too_many_arguments)]
+    fn measure_text_family_kerned(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        family: &str,
+        weight: u16,
+        italic: bool,
+        _kerning: Option<bool>,
+    ) -> f32 {
+        self.measure_text_family_styled(text, font_size, family, weight, italic)
     }
 
     fn measure_text_family_styled(
