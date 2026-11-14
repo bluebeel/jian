@@ -13,3 +13,4 @@ test-support = []
 [dependencies]
 jian-ops-schema = { path = "../jian-ops-schema" }
 jian-widgets = { path = "../jian-widgets" }
+kurbo = "0.13.1"
