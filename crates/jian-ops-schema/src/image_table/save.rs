@@ -20,7 +20,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 mod compact;
-pub use compact::write_document;
+pub use compact::{
+    write_document, write_document_with_extension as write_document_compact_with_extension,
+};
 mod order;
 pub use order::{visit_legacy_node_roots, SaveImageOrder};
 

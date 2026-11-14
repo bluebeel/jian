@@ -1,4 +1,4 @@
-//! Compact, allocation-bounded canonical saves without host extensions.
+//! Compact, allocation-bounded canonical saves with optional host extensions.
 
 use super::{order, with_collector, SaveCollector, SaveImageOrder, SaveTableWriteStats};
 use crate::image_thumbs::ImageThumbSnapshot;
@@ -16,13 +16,55 @@ pub fn write_document<W: Write, D: Serialize + SaveImageOrder + ?Sized>(
     document: &D,
     thumbnails: &ImageThumbSnapshot,
 ) -> serde_json::Result<SaveTableWriteStats> {
+    write_document_inner(
+        writer,
+        document,
+        thumbnails,
+        LegacyValueNumbers::default(),
+        |_, _| Ok(()),
+    )
+}
+
+/// Compact equivalent of the pretty host-extension writer. Ordinary typed
+/// float formatting intentionally matches that writer, including f32 values;
+/// the older document-only API retains its separate Value-number contract.
+pub fn write_document_with_extension<
+    W: Write,
+    D: Serialize + SaveImageOrder + ?Sized,
+    T: Serialize,
+>(
+    writer: &mut W,
+    document: &D,
+    thumbnails: &ImageThumbSnapshot,
+    extension_name: &str,
+    extension: &T,
+) -> serde_json::Result<SaveTableWriteStats> {
+    write_document_inner(
+        writer,
+        document,
+        thumbnails,
+        serde_json::ser::CompactFormatter,
+        |writer, has_fields| field(writer, has_fields, extension_name, extension),
+    )
+}
+
+fn write_document_inner<
+    W: Write,
+    D: Serialize + SaveImageOrder + ?Sized,
+    F: serde_json::ser::Formatter,
+>(
+    writer: &mut W,
+    document: &D,
+    thumbnails: &ImageThumbSnapshot,
+    formatter: F,
+    extension: impl FnOnce(&mut W, &mut bool) -> serde_json::Result<()>,
+) -> serde_json::Result<SaveTableWriteStats> {
     let mut collector = SaveCollector::default();
     order::prepare(document, &mut collector);
     with_collector(collector, thumbnails, |tables| {
         let mut root = ObjectTail::new(writer);
         document.serialize(&mut serde_json::Serializer::with_formatter(
-            &mut root,
-            LegacyValueNumbers::default(),
+            &mut root, formatter,
         ))?;
         let mut has_fields = root.finish()?;
         let wrote_images_table = !tables.images_is_empty();
@@ -34,6 +76,7 @@ pub fn write_document<W: Write, D: Serialize + SaveImageOrder + ?Sized>(
         if wrote_image_thumbs {
             field(writer, &mut has_fields, "imageThumbs", &image_thumbs)?;
         }
+        extension(writer, &mut has_fields)?;
         writer.write_all(b"}").map_err(serde_json::Error::io)?;
         Ok(SaveTableWriteStats {
             wrote_images_table,
@@ -146,3 +189,7 @@ impl serde_json::ser::Formatter for LegacyValueNumbers {
 #[cfg(test)]
 #[path = "compact_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "compact_extension_tests.rs"]
+mod extension_tests;
