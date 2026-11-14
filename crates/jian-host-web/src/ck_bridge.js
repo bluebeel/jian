@@ -606,12 +606,15 @@ class Surface {
     if (jianDrawTriangularShadow(this.ck, this.canvas, this.runtime.shadowKernel, rect, radii, shadow, this.shadowBasis,
       this.runtime.cornerShadowKernel)) return;
     const spread = shadow[3];
+    const f=Math.fround;
+    const w=f(rect[2]+f(spread*2)),h=f(rect[3]+f(spread*2));
+    if (!(w>0 && h>0)) return;
+    const [dx,dy]=jianShadowOffset(this.canvas.getTotalMatrix?.(),this.shadowBasis,shadow[0],shadow[1]);
+    const corners=spread===0 ? radii : jianFitShadowCorners(rect[2],rect[3],radii)
+      .map(radius=>radius<=0 ? 0 : Math.max(0,f(radius+spread)));
     const path = this.rrect([
-      rect[0] + shadow[0] - spread,
-      rect[1] + shadow[1] - spread,
-      Math.max(0, rect[2] + spread * 2),
-      Math.max(0, rect[3] + spread * 2),
-    ], Array.from(radii, (radius) => Math.max(0, radius + spread)));
+      f(f(rect[0]-spread)+dx),f(f(rect[1]-spread)+dy),w,h,
+    ], corners);
     const paint = new this.ck.Paint();
     paint.setAntiAlias(true);
     paint.setColor(this.ck.Color4f(shadow[4], shadow[5], shadow[6], shadow[7]));

@@ -23,6 +23,47 @@ pub(super) fn draw_shadowed_rect(
         }
         crate::raster_sampling::mark_unsupported("triangular shadow shader unavailable");
     }
+    let current = canvas.local_to_device_as_3x3();
+    let offset = match (basis, current.invert()) {
+        (Some(basis), Some(inverse))
+            if current.scale_x() != basis.scale_x()
+                || current.scale_y() != basis.scale_y()
+                || current.skew_x() != basis.skew_x()
+                || current.skew_y() != basis.skew_y() =>
+        {
+            inverse.map_vector(basis.map_vector((shadow.dx, shadow.dy)))
+        }
+        _ => SkPoint::new(shadow.dx, shadow.dy),
+    };
+    let spread = shadow.spread;
+    let size = if spread == 0.0 {
+        rect.size
+    } else {
+        jian_core::geometry::Size::new(
+            rect.size.width + spread * 2.0,
+            rect.size.height + spread * 2.0,
+        )
+    };
+    if size.width <= 0.0 || size.height <= 0.0 {
+        return;
+    }
+    let offset_rect = Rect::new(
+        jian_core::geometry::point(
+            (rect.min_x() - spread) + offset.x,
+            (rect.min_y() - spread) + offset.y,
+        ),
+        size,
+    );
+    let mut corners = [radii.tl, radii.tr, radii.br, radii.bl];
+    if spread != 0.0 {
+        let Some(base) = jian_core::render::shadow::fitted_corner_radii(
+            [rect.size.width, rect.size.height],
+            corners,
+        ) else {
+            return;
+        };
+        corners = base.map(|r| if r <= 0.0 { 0.0 } else { (r + spread).max(0.0) });
+    }
     let mut paint = SkPaint::new(c4, None);
     crate::raster_sampling::configure_geometry(&mut paint);
     paint.set_style(PaintStyle::Fill);
@@ -31,18 +72,14 @@ pub(super) fn draw_shadowed_rect(
     if sigma > 0.0 {
         paint.set_mask_filter(skia_safe::MaskFilter::blur(BlurStyle::Normal, sigma, None));
     }
-    let offset_rect = Rect::new(
-        jian_core::geometry::point(rect.min_x() + shadow.dx, rect.min_y() + shadow.dy),
-        rect.size,
-    );
-    let is_rounded = radii != BorderRadii::zero();
+    let is_rounded = corners.iter().any(|r| *r != 0.0);
     if is_rounded {
         let sk_rect = to_sk_rect(offset_rect);
         let radii_arr = [
-            SkPoint::new(radii.tl, radii.tl),
-            SkPoint::new(radii.tr, radii.tr),
-            SkPoint::new(radii.br, radii.br),
-            SkPoint::new(radii.bl, radii.bl),
+            SkPoint::new(corners[0], corners[0]),
+            SkPoint::new(corners[1], corners[1]),
+            SkPoint::new(corners[2], corners[2]),
+            SkPoint::new(corners[3], corners[3]),
         ];
         let rrect = RRect::new_rect_radii(sk_rect, &radii_arr);
         canvas.draw_rrect(rrect, &paint);
