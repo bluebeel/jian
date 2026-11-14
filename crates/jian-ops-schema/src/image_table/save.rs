@@ -19,6 +19,8 @@ use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
+mod compact;
+pub use compact::write_document;
 mod order;
 pub use order::{visit_legacy_node_roots, SaveImageOrder};
 
