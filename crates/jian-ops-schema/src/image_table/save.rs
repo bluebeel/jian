@@ -23,7 +23,10 @@ mod compact;
 pub use compact::{
     write_document, write_document_with_extension as write_document_compact_with_extension,
 };
+mod identity;
+mod object;
 mod order;
+pub use object::write_object_compact_with_extension;
 pub use order::{visit_legacy_node_roots, SaveImageOrder};
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
@@ -50,41 +53,51 @@ impl SaveCollector {
         if source_text.starts_with(REF_PREFIX) {
             return None;
         }
-        self.referenced_paint_ids
-            .insert(crate::node::image_src::paint_image_id(source_text));
         if source_text.len() < MIN_EXTERNALIZE_LEN || !source_text.starts_with("data:") {
+            self.referenced_paint_ids
+                .insert(crate::node::image_src::paint_image_id(source_text));
             return None;
         }
-
         let payload = source.as_arc();
         let allocation = AllocationKey {
             address: Arc::as_ptr(&payload) as *const () as usize,
             len: payload.len(),
         };
-        if let Some(id) = self.allocations.get(&allocation) {
-            return Some(format!("{REF_PREFIX}{id}"));
+        // The prepass already recorded the paint ID and pins the payload in
+        // this save's table. Repeated references need no digest or formatting.
+        if let Some(reference) = self.allocations.get(&allocation) {
+            return Some(reference.clone());
         }
-
-        let base = format!("{:016x}", fnv1a64(source_text.as_bytes()));
+        let digest = identity::digest(&payload, allocation);
+        self.referenced_paint_ids.insert(digest.paint);
+        let base = format!("{:016x}", digest.full);
         let mut id = base.clone();
         let mut probe = 1_u32;
-        loop {
+        let memoize = loop {
             match self.image_indices.get(&id).copied() {
                 None => {
                     let index = self.images.len();
                     self.images.push((id.clone(), payload));
                     self.image_indices.insert(id.clone(), index);
-                    break;
+                    break true;
                 }
-                Some(index) if self.images[index].1.as_ref() == source_text => break,
+                Some(index) if self.images[index].1.as_ref() == source_text => {
+                    break Arc::ptr_eq(&self.images[index].1, &payload)
+                }
                 Some(_) => {
                     probe += 1;
                     id = format!("{base}-{probe}");
                 }
             }
+        };
+        let reference = format!("{REF_PREFIX}{id}");
+        // Only a payload pinned in this save's image table can use an address
+        // memo. Distinct equal temporary Arcs must not be retained unboundedly
+        // or have a recycled address interpreted as another image's reference.
+        if memoize {
+            self.allocations.insert(allocation, reference.clone());
         }
-        self.allocations.insert(allocation, id.clone());
-        Some(format!("{REF_PREFIX}{id}"))
+        Some(reference)
     }
 }
 
