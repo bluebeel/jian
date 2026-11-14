@@ -7,66 +7,113 @@ fn storage<T>(value: &Option<Box<T>>) -> usize {
         0
     }
 }
+fn fill_storage(fills: Option<&[crate::style::PenFill]>) -> usize {
+    fills
+        .unwrap_or_default()
+        .iter()
+        .map(|fill| match fill {
+            crate::style::PenFill::Image(_) => std::mem::size_of::<crate::style::ImageFillBody>(),
+            _ => 0,
+        })
+        .sum()
+}
+fn style_storage(
+    fills: Option<&[crate::style::PenFill]>,
+    stroke: Option<&crate::style::PenStroke>,
+) -> usize {
+    fill_storage(fills) + fill_storage(stroke.and_then(|stroke| stroke.fill.as_deref()))
+}
+fn state_fill_storage(states: &Option<Box<crate::state_override::WidgetStates>>) -> usize {
+    let Some(states) = states.as_deref() else {
+        return 0;
+    };
+    [
+        &states.hover,
+        &states.pressed,
+        &states.focused,
+        &states.disabled,
+    ]
+    .into_iter()
+    .flatten()
+    .map(|style| style_storage(style.fill.as_deref(), style.stroke.as_ref()))
+    .sum()
+}
 impl PenNode {
-    /// Bytes in the sparse optional metadata boxes, excluding their own nested
+    /// Bytes in sparse metadata and image-paint boxes, excluding their own nested
     /// buffers/maps. None allocates nothing; Some(empty) retains its allocation.
     /// Memory ledgers add this to existing nested-buffer accounting.
     pub fn boxed_optional_storage_bytes(&self) -> usize {
         let metadata = match self {
             PenNode::Frame(node) => {
-                storage(&node.events)
+                style_storage(
+                    node.container.fill.as_deref(),
+                    node.container.stroke.as_ref(),
+                ) + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
             }
             PenNode::Group(node) => {
-                storage(&node.events)
+                style_storage(
+                    node.container.fill.as_deref(),
+                    node.container.stroke.as_ref(),
+                ) + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
             }
             PenNode::Rectangle(node) => {
-                storage(&node.events)
+                style_storage(
+                    node.container.fill.as_deref(),
+                    node.container.stroke.as_ref(),
+                ) + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
             }
             PenNode::Ellipse(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
             }
             PenNode::Line(node) => {
-                storage(&node.events)
+                style_storage(None, node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
             }
             PenNode::Polygon(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
             }
             PenNode::Path(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
             }
             PenNode::Text(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), None)
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
             }
             PenNode::TextInput(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
                     + storage(&node.states)
+                    + state_fill_storage(&node.states)
             }
             PenNode::Image(node) => {
                 storage(&node.events)
@@ -75,73 +122,92 @@ impl PenNode {
                     + storage(&node.gestures)
             }
             PenNode::IconFont(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
             }
             PenNode::TextArea(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
                     + storage(&node.states)
+                    + state_fill_storage(&node.states)
             }
             PenNode::Select(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
                     + storage(&node.states)
+                    + state_fill_storage(&node.states)
             }
             PenNode::Switch(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
                     + storage(&node.states)
+                    + state_fill_storage(&node.states)
             }
             PenNode::Checkbox(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
                     + storage(&node.states)
+                    + state_fill_storage(&node.states)
             }
             PenNode::Slider(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
                     + storage(&node.states)
+                    + state_fill_storage(&node.states)
             }
             PenNode::RadioGroup(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
                     + storage(&node.states)
+                    + state_fill_storage(&node.states)
             }
             PenNode::NumberInput(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
                     + storage(&node.states)
+                    + state_fill_storage(&node.states)
             }
             PenNode::Progress(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
                     + storage(&node.states)
+                    + state_fill_storage(&node.states)
             }
             PenNode::Tabs(node) => {
-                storage(&node.events)
+                style_storage(node.fill.as_deref(), node.stroke.as_ref())
+                    + storage(&node.events)
                     + storage(&node.lifecycle)
                     + storage(&node.semantics)
                     + storage(&node.gestures)
                     + storage(&node.states)
+                    + state_fill_storage(&node.states)
             }
             PenNode::Ref(node) => {
                 storage(&node.events)

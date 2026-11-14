@@ -537,7 +537,7 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
                 .map(|s| OwnedRun {
                     text: s.text.clone(),
                     font_family: s.font_family.clone().or_else(|| node_family.clone()),
-                    font_size: s.font_size.unwrap_or(node_size),
+                    font_size: s.font_size.map(|value| value as f32).unwrap_or(node_size),
                     font_weight: s.font_weight.map(|n| n as u16).unwrap_or(node_weight),
                     font_style: match s.font_style {
                         Some(jian_ops_schema::style::FontStyleKind::Italic) => {
