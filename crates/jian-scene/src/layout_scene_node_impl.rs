@@ -167,6 +167,7 @@ impl SceneNode {
             gradient: None,
             shader: None,
             stroke: None,
+            stroke_paint: None,
             text: None,
             text_runs: Vec::new(),
             font_family: String::new(),

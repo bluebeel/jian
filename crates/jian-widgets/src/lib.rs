@@ -31,3 +31,6 @@ pub use tokens::{Density, Tokens};
 pub fn centered_text_baseline_y(rect: Rect, font_size: f32) -> f32 {
     rect.origin.y + rect.size.y / 2.0 + font_size * 0.35
 }
+
+mod stroke_paint;
+pub use stroke_paint::*;

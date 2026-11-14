@@ -340,6 +340,12 @@ fn set_matching_node_stroke(nodes: &mut [SceneNode], ids: &[String], color: Colo
             // that case is left for the caller's rebuild fallback.
             if let Some(stroke) = node.stroke.as_mut() {
                 stroke.color = bake_node_alpha(color, node.opacity);
+                if let Some(paint) = node.stroke_paint.as_mut() {
+                    if let Some(layer) = std::sync::Arc::make_mut(paint).layers.first_mut() {
+                        let blend_mode = layer.blend_mode();
+                        *layer = SceneFillLayer::Solid { color, blend_mode };
+                    }
+                }
                 changed = true;
             }
         } else if set_matching_node_stroke(&mut node.children, ids, color) {
@@ -547,6 +553,7 @@ pub struct SceneNode {
     /// Resolved stroke (colour + width). `$ref` stroke colours are
     /// resolved at build time. `None` = no stroke.
     pub stroke: Option<SceneStroke>,
+    pub stroke_paint: Option<std::sync::Arc<crate::SceneStrokePaint>>,
     /// Text content — `Some` for Text nodes (and the lucide glyph
     /// name for `icon_font`). `None` for non-text kinds. Styled text
     /// is flattened into this string; per-segment styling rides in

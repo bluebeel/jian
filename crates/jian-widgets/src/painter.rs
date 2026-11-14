@@ -306,6 +306,29 @@ pub trait Painter {
         self.push_mask_source_layer(luminance);
     }
 
+    /// Paint fields may extend beyond their original coordinate rectangle,
+    /// as required for center/outside strokes. Native/Web implement the scope.
+    fn supports_stroke_paint_fields(&self) -> bool {
+        false
+    }
+    fn push_paint_space(&mut self, rect: crate::Rect) {
+        let _ = rect;
+        self.save();
+    }
+    fn pop_paint_space(&mut self) {
+        self.restore();
+    }
+    /// Exact curve stroke. False retains legacy custom-backend compatibility.
+    fn stroke_geometry(
+        &mut self,
+        geometry: crate::StrokeGeometry<'_>,
+        options: &crate::StrokeMaskOptions<'_>,
+        color: crate::Color,
+    ) -> bool {
+        let _ = (geometry, options, color);
+        false
+    }
+
     /// Begin an isolated compositing layer. Draws until the matching
     /// [`Painter::restore`] are blended with the backdrop using `mode`.
     /// Backends without save-layer blend support degrade to source-over while
