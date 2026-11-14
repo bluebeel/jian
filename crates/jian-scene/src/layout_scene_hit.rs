@@ -20,6 +20,7 @@
 use crate::layout_scene::NodeKind;
 use crate::layout_scene::{regular_polygon_points, LayoutScene, SceneNode};
 use crate::path_geometry::{flatten_path_points, PathPoints};
+use crate::scene_hit_index::SceneHitIndex;
 use jian_widgets::geometry::{Point2D, Rect};
 
 impl LayoutScene {
@@ -49,7 +50,7 @@ impl LayoutScene {
     /// Hidden subtrees are omitted entirely. Rotation and flips are resolved
     /// at every ancestor exactly as in the single-id hit-test.
     pub fn node_path_at_doc_point(&self, point: Point2D, zoom: f32) -> Option<Vec<String>> {
-        self.node_path_at_doc_point_impl(point, zoom, false)
+        self.node_path_at_doc_point_impl(point, zoom, false, None)
     }
 
     /// Like [`Self::node_path_at_doc_point`], but an unpainted container body
@@ -62,20 +63,21 @@ impl LayoutScene {
         point: Point2D,
         zoom: f32,
     ) -> Option<Vec<String>> {
-        self.node_path_at_doc_point_impl(point, zoom, true)
+        self.node_path_at_doc_point_impl(point, zoom, true, None)
     }
 
-    fn node_path_at_doc_point_impl(
+    pub(crate) fn node_path_at_doc_point_impl(
         &self,
         point: Point2D,
         zoom: f32,
         include_empty_body: bool,
+        index: Option<&SceneHitIndex>,
     ) -> Option<Vec<String>> {
         let zoom = zoom.max(0.0001);
         let page = self.active_page()?;
         let mut path = Vec::new();
         for child in &page.children {
-            if hit_test_path_walk(child, point, zoom, &mut path, include_empty_body) {
+            if hit_test_path_walk(child, point, zoom, &mut path, include_empty_body, index) {
                 return Some(path.into_iter().map(str::to_owned).collect());
             }
             debug_assert!(path.is_empty());
@@ -156,8 +158,9 @@ fn hit_test_path_walk<'a>(
     zoom: f32,
     path: &mut Vec<&'a str>,
     include_empty_body: bool,
+    index: Option<&SceneHitIndex>,
 ) -> bool {
-    if node.hidden {
+    if node.hidden || index.is_some_and(|index| !index.may_hit(node, point, zoom)) {
         return false;
     }
     let bounds = node.aggregate_bounds();
@@ -165,7 +168,7 @@ fn hit_test_path_walk<'a>(
     path.push(node.id.as_str());
     // Same painted-subtree rule as `hit_test_walk`.
     for child in node.visible_children() {
-        if hit_test_path_walk(child, local, zoom, path, include_empty_body) {
+        if hit_test_path_walk(child, local, zoom, path, include_empty_body, index) {
             return true;
         }
     }
@@ -220,7 +223,7 @@ fn point_in_node_space(node: &SceneNode, point: Point2D, bounds: Rect) -> Point2
 /// a Line with a negative-size dimension collapses its aggregate to
 /// `Rect::ZERO` (the segment midpoint is still well defined from
 /// `bounds`). Returns `None` when no valid pivot exists.
-fn rotation_pivot(node: &SceneNode, bounds: Rect) -> Option<Point2D> {
+pub(crate) fn rotation_pivot(node: &SceneNode, bounds: Rect) -> Option<Point2D> {
     if matches!(node.kind, NodeKind::Line) {
         let raw = node.bounds;
         if raw.size.x.abs() < f32::EPSILON && raw.size.y.abs() < f32::EPSILON {
