@@ -58,6 +58,7 @@ pub mod startup;
 pub mod surface;
 #[cfg(feature = "textlayout")]
 pub mod text_geometry;
+pub mod triangular_shadow;
 
 pub use backend::SkiaBackend;
 #[cfg(feature = "textlayout")]

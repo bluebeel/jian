@@ -459,6 +459,9 @@ fn apply_shadow_then_push_layer_consumes_filter() {
     let mut surface = backend.new_surface(size(32.0, 32.0));
     backend.begin_frame(&mut surface, 0xffffffff);
     backend.apply_shadow(&ShadowSpec {
+        blur_kernel: Default::default(),
+        float_color: None,
+        silhouette: None,
         color: Color::rgba(0, 0, 0, 128),
         dx: 2.0,
         dy: 2.0,

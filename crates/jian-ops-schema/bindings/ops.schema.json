@@ -9687,6 +9687,16 @@
             },
             "color": {
               "type": "string"
+            },
+            "blurKernel": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ShadowBlurKernel"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }
@@ -10633,6 +10643,14 @@
       "enum": [
         "full",
         "reduced"
+      ]
+    },
+    "ShadowBlurKernel": {
+      "description": "Blur profile for a shadow silhouette. Missing values retain Gaussian blur.",
+      "type": "string",
+      "enum": [
+        "gaussian",
+        "triangular"
       ]
     }
   }

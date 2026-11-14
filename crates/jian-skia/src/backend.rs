@@ -29,6 +29,10 @@ use skia_safe::{
 mod gradients;
 use gradients::{draw_linear_gradient_rect, draw_mesh_gradient_rect, draw_radial_gradient_rect};
 
+#[path = "backend/shadows.rs"]
+mod shadows;
+use shadows::draw_shadowed_rect;
+
 /// Buffered command — one-to-one with a trait-level `RenderBackend` call.
 #[derive(Clone)]
 enum Cmd {
@@ -48,6 +52,7 @@ pub struct SkiaBackend {
     /// Consumed by the next `push_layer` so the layer is drawn with the
     /// filter applied.
     pending_filter: Option<ImageFilter>,
+    pending_analytic_shadow: Option<ShadowSpec>,
     /// Recorded commands for the current frame. Drained by `end_frame`.
     cmds: Vec<Cmd>,
     /// Decoded `sk_Image` cache keyed by `ImageSource::cache_key`.
@@ -63,6 +68,7 @@ impl SkiaBackend {
     pub fn new() -> Self {
         Self {
             pending_filter: None,
+            pending_analytic_shadow: None,
             cmds: Vec::new(),
             image_cache: ImageCache::new(),
             shader_cache: ShaderCache::new(),
@@ -99,11 +105,13 @@ impl RenderBackend for SkiaBackend {
         canvas.save();
         self.cmds.clear();
         self.pending_filter = None;
+        self.pending_analytic_shadow = None;
     }
 
     fn end_frame(&mut self, surface: &mut Self::Surface) {
         let cmds = std::mem::take(&mut self.cmds);
         let canvas = surface.canvas();
+        let shadow_basis = canvas.local_to_device_as_3x3();
         for cmd in cmds {
             match cmd {
                 Cmd::PushClip(r) => {
@@ -139,7 +147,13 @@ impl RenderBackend for SkiaBackend {
                     canvas.restore();
                 }
                 Cmd::Draw(op) => {
-                    draw_canvas(canvas, &op, &mut self.image_cache, &mut self.shader_cache);
+                    draw_canvas(
+                        canvas,
+                        &op,
+                        &mut self.image_cache,
+                        &mut self.shader_cache,
+                        Some(&shadow_basis),
+                    );
                 }
             }
         }
@@ -161,6 +175,15 @@ impl RenderBackend for SkiaBackend {
     }
 
     fn push_layer(&mut self, bounds: Rect) {
+        if let Some(shadow) = self.pending_analytic_shadow.take() {
+            if let Some(shape) = shadow.silhouette {
+                self.record(Cmd::Draw(DrawOp::ShadowedRect {
+                    rect: shape.bounds,
+                    radii: shape.radii,
+                    shadow,
+                }));
+            }
+        }
         let filter = self.pending_filter.take();
         self.record(Cmd::PushLayer { bounds, filter });
     }
@@ -170,17 +193,33 @@ impl RenderBackend for SkiaBackend {
     }
 
     fn apply_blur(&mut self, sigma: f32) {
+        self.pending_analytic_shadow = None;
         self.pending_filter = image_filters::blur((sigma, sigma), None, None, None);
     }
 
     fn apply_shadow(&mut self, shadow: &ShadowSpec) {
+        self.pending_analytic_shadow = None;
+        if shadow.blur_kernel == jian_core::render::shadow::ShadowBlurKernel::Triangular {
+            if shadow.silhouette.is_some() {
+                self.pending_filter = None;
+                self.pending_analytic_shadow = Some(shadow.clone());
+                return;
+            }
+            crate::raster_sampling::mark_unsupported(
+                "triangular shadow of an arbitrary layer mask",
+            );
+        }
         let color = to_sk_color(shadow.color);
-        let rgba = Color::from_argb(
+        let packed = Color::from_argb(
             (color.a * 255.0) as u8,
             (color.r * 255.0) as u8,
             (color.g * 255.0) as u8,
             (color.b * 255.0) as u8,
         );
+        let rgba: Color4f = shadow
+            .float_color
+            .map(|c| Color4f::new(c[0], c[1], c[2], c[3]))
+            .unwrap_or_else(|| packed.into());
         self.pending_filter = image_filters::drop_shadow(
             (shadow.dx, shadow.dy),
             (shadow.blur, shadow.blur),
@@ -206,6 +245,7 @@ impl SkiaBackend {
             op,
             &mut self.image_cache,
             &mut self.shader_cache,
+            None,
         );
     }
 
@@ -215,7 +255,13 @@ impl SkiaBackend {
     /// OpenPencil's `SharedSkiaContext`) and only need the per-`DrawOp`
     /// canvas dispatch from this crate.
     pub fn draw_on_canvas(&mut self, canvas: &skia_safe::Canvas, op: &DrawOp) {
-        draw_canvas(canvas, op, &mut self.image_cache, &mut self.shader_cache);
+        draw_canvas(
+            canvas,
+            op,
+            &mut self.image_cache,
+            &mut self.shader_cache,
+            None,
+        );
     }
 }
 
@@ -224,6 +270,7 @@ fn draw_canvas(
     op: &DrawOp,
     image_cache: &mut ImageCache,
     shader_cache: &mut ShaderCache,
+    shadow_basis: Option<&skia_safe::Matrix>,
 ) {
     match op {
         DrawOp::Rect { rect, paint } => draw_rect(canvas, *rect, paint),
@@ -281,7 +328,7 @@ fn draw_canvas(
             radii,
             shadow,
         } => {
-            draw_shadowed_rect(canvas, *rect, *radii, shadow);
+            draw_shadowed_rect(canvas, *rect, *radii, shadow, shadow_basis);
         }
         DrawOp::Icon {
             rect,
@@ -647,43 +694,6 @@ fn build_shader(
         let _ = builder.set_uniform_float(&u.name, &u.values);
     }
     builder.make_shader(&skia_safe::Matrix::default())
-}
-
-fn draw_shadowed_rect(
-    canvas: &skia_safe::Canvas,
-    rect: Rect,
-    radii: BorderRadii,
-    shadow: &jian_core::render::ShadowSpec,
-) {
-    // Draw a blurred copy of the shape in `shadow.color` offset by
-    // (dx, dy). The foreground fill lands via a subsequent draw-op.
-    let c4 = to_sk_color(shadow.color);
-    let mut paint = SkPaint::new(c4, None);
-    crate::raster_sampling::configure_geometry(&mut paint);
-    paint.set_style(PaintStyle::Fill);
-    // Skia's blur filter uses sigma; CSS-ish `blur` is ~= sigma * 2.
-    let sigma = (shadow.blur * 0.5).max(0.0);
-    if sigma > 0.0 {
-        paint.set_mask_filter(skia_safe::MaskFilter::blur(BlurStyle::Normal, sigma, None));
-    }
-    let offset_rect = Rect::new(
-        jian_core::geometry::point(rect.min_x() + shadow.dx, rect.min_y() + shadow.dy),
-        rect.size,
-    );
-    let is_rounded = radii != BorderRadii::zero();
-    if is_rounded {
-        let sk_rect = to_sk_rect(offset_rect);
-        let radii_arr = [
-            SkPoint::new(radii.tl, radii.tl),
-            SkPoint::new(radii.tr, radii.tr),
-            SkPoint::new(radii.br, radii.br),
-            SkPoint::new(radii.bl, radii.bl),
-        ];
-        let rrect = RRect::new_rect_radii(sk_rect, &radii_arr);
-        canvas.draw_rrect(rrect, &paint);
-    } else {
-        canvas.draw_rect(to_sk_rect(offset_rect), &paint);
-    }
 }
 
 fn draw_rect(canvas: &skia_safe::Canvas, r: Rect, paint: &Paint) {

@@ -2,11 +2,13 @@
 
 use crate::geometry::{fold_alpha, Color, Point2D, Rect};
 mod image_options;
+mod shadow_options;
 mod text_decoration;
 mod text_layout;
 pub use image_options::{
     ImageAdjustments, ImageBlendMode, ImageDrawMode, ImagePaintOptions, ImagePaintThumbnail,
 };
+pub use shadow_options::{RoundRectShadowOptions, ShadowBlurKernel};
 pub use text_decoration::TextDecorationRequest;
 pub use text_layout::{TextBaselineRequest, TextLayout};
 
@@ -227,6 +229,17 @@ pub trait Painter {
     /// and reflection; simple painters retain their existing coordinate space.
     fn shadow_offset_in_local_space(&self, offset: Point2D) -> Point2D {
         offset
+    }
+
+    /// Returns false when the host cannot paint this profile. Callers can
+    /// retain their legacy outer-shadow fallback without claiming support.
+    fn fill_round_rect_shadow(
+        &mut self,
+        _rect: Rect,
+        _radius: f32,
+        _shadow: &RoundRectShadowOptions,
+    ) -> bool {
+        false
     }
 
     fn fill_drop_shadow(&mut self, rect: Rect, radius: f32, blur: f32, color: Color) {

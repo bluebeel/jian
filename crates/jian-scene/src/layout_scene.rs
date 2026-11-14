@@ -85,6 +85,7 @@ pub struct DropShadow {
     pub offset_x: f32,
     pub offset_y: f32,
     pub blur: f32,
+    pub blur_kernel: jian_ops_schema::style::ShadowBlurKernel,
     /// Signed silhouette expansion in document pixels before blur.
     pub spread: f32,
     pub color: Color,

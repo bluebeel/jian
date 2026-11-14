@@ -399,6 +399,25 @@ pub struct BlurBody {
     pub visible: Option<bool>,
 }
 
+/// Blur profile for a shadow silhouette. Missing values retain Gaussian blur.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
+#[serde(rename_all = "camelCase")]
+pub enum ShadowBlurKernel {
+    #[default]
+    Gaussian,
+    Triangular,
+}
+
+impl ShadowBlurKernel {
+    pub fn is_gaussian(&self) -> bool {
+        matches!(self, Self::Gaussian)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
@@ -411,6 +430,8 @@ pub struct ShadowBody {
     pub offset_x: f32,
     pub offset_y: f32,
     pub blur: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur_kernel: Option<ShadowBlurKernel>,
     pub spread: f32,
     pub color: String,
 }
@@ -711,5 +732,26 @@ mod decoration_metadata_tests {
             .unwrap()
             .get("textDecorationSkipInk")
             .is_none());
+    }
+}
+
+#[cfg(test)]
+mod shadow_profile_tests {
+    use super::*;
+    #[test]
+    fn shadow_profile_is_optional_and_explicit_triangular_survives_serde() {
+        let source = r##"{"offsetX":0,"offsetY":1,"blur":8,"spread":0,"color":"#00000040"}"##;
+        let mut shadow: ShadowBody = serde_json::from_str(source).unwrap();
+        assert_eq!(shadow.blur_kernel, None);
+        assert!(!serde_json::to_string(&shadow)
+            .unwrap()
+            .contains("blurKernel"));
+        shadow.blur_kernel = Some(ShadowBlurKernel::Triangular);
+        let encoded = serde_json::to_string(&shadow).unwrap();
+        assert!(encoded.contains("triangular"));
+        assert_eq!(
+            serde_json::from_str::<ShadowBody>(&encoded).unwrap(),
+            shadow
+        );
     }
 }

@@ -229,6 +229,23 @@ pub fn configure_final_src_over(paint: &mut Paint) {
     }
 }
 
+/// Use a float RGBA8 source-over write independently of the coverage mode.
+/// Analytic translucent sources otherwise lose precision in Skia's packed
+/// color path before their coverage and destination are composed.
+pub fn configure_framebuffer_blend(paint: &mut Paint) -> Result<(), PointSamplingError> {
+    BLENDERS.with(|cache| {
+        let blenders = cache.as_ref().map_err(Clone::clone)?;
+        let blender = blenders
+            .iter()
+            .find(|(mode, _)| *mode == BlendMode::SrcOver)
+            .ok_or(PointSamplingError::CreateBlender {
+                mode: BlendMode::SrcOver,
+            })?;
+        paint.set_blender(blender.1.clone());
+        Ok(())
+    })
+}
+
 /// A point-image shader may promise byte-normalized colors and binary alpha.
 /// With full paint opacity and no filters, ordinary SrcOver then has exactly
 /// the same byte result for every backdrop and avoids a redundant quantizer.
