@@ -43,8 +43,8 @@ mod save;
 
 pub(crate) use save::scoped_reference;
 pub use save::{
-    visit_legacy_node_roots, with_save_scope, write_document, write_document_with_extension,
-    SaveImageOrder, SaveImageTable, SaveTableWriteStats, SaveTables,
+    visit_legacy_node_roots, with_save_scope, without_save_scope, write_document,
+    write_document_with_extension, SaveImageOrder, SaveImageTable, SaveTableWriteStats, SaveTables,
 };
 
 /// Key of the top-level table in the serialized document.

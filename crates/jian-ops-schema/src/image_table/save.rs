@@ -153,6 +153,20 @@ pub fn with_save_scope<R>(
     with_collector(SaveCollector::default(), thumbnails, f)
 }
 
+/// Inspect canonical values without changing an enclosing save collector.
+/// The previous scope is restored on normal return and unwind.
+pub fn without_save_scope<R>(f: impl FnOnce() -> R) -> R {
+    let previous = ACTIVE_COLLECTOR.with(|active| active.borrow_mut().take());
+    struct Restore(Option<Rc<RefCell<SaveCollector>>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            ACTIVE_COLLECTOR.with(|active| *active.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(previous);
+    f()
+}
+
 fn with_collector<R>(
     collector: SaveCollector,
     thumbnails: &ImageThumbSnapshot,
