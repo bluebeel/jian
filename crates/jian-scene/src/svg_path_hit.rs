@@ -106,11 +106,14 @@ pub(super) fn contains(node: &SceneNode, point: Point2D, zoom: f32) -> bool {
     // Positive fitted bounds contain every curve extremum. Reject misses
     // before parsing, cache lookup, or nearest-curve work.
     let fitted = size.0 > 0.0 && size.1 > 0.0 && size.0.is_finite() && size.1.is_finite();
+    // The painter leaves a native span <= .01 unscaled. Such an outline
+    // can extend slightly beyond a smaller positive authored dimension.
+    let broad_slack = tolerance + 0.01;
     if fitted
-        && (local.x < -tolerance
-            || local.y < -tolerance
-            || local.x > size.0 + tolerance
-            || local.y > size.1 + tolerance)
+        && (local.x < -broad_slack
+            || local.y < -broad_slack
+            || local.x > size.0 + broad_slack
+            || local.y > size.1 + broad_slack)
     {
         return false;
     }

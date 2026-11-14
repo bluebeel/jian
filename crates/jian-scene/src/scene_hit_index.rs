@@ -170,7 +170,10 @@ fn capture(node: &SceneNode, index: &mut HashMap<usize, Bounds>) -> Bounds {
             // Degenerate SVG paths translate without fitting; their native
             // outline can extend beyond authored bounds. Keep exact fallback.
             bounds = Bounds::UNBOUNDED;
-        } else if node.svg_path.is_none() {
+        } else if node.svg_path.is_some() {
+            // Paint leaves near-zero native spans unscaled when fitting.
+            bounds.inflate(0.01);
+        } else {
             for point in &node.points {
                 bounds.point(*point);
             }
