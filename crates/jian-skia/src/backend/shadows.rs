@@ -82,15 +82,15 @@ fn triangular(
         _ => SkPoint::new(shadow.dx, shadow.dy),
     };
     bounds.offset(offset);
-    let Some(shader) = crate::triangular_shadow::shader(bounds, radius, shadow.blur, color, false)
-    else {
-        return false;
-    };
-    let mut paint = SkPaint::default();
-    paint.set_shader(shader);
-    if crate::raster_sampling::configure_framebuffer_blend(&mut paint).is_err() {
-        return false;
-    }
-    canvas.draw_rect(bounds.with_outset((shadow.blur, shadow.blur)), &paint);
-    true
+    crate::triangular_shadow::draw(
+        canvas,
+        &crate::triangular_shadow::RoundedShadowDraw {
+            bounds,
+            radius,
+            blur: shadow.blur,
+            color,
+            inner: false,
+            draw_bounds: bounds.with_outset((shadow.blur, shadow.blur)),
+        },
+    )
 }
