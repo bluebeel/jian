@@ -3,11 +3,11 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 
 fn round_trip<T: DeserializeOwned + Serialize>(source: Value) {
-    let typed: T = serde_json::from_value(source.clone()).expect("typed style");
-    assert_eq!(
-        serde_json::to_value(typed).expect("serialize style"),
-        source
-    );
+    let typed: T = serde_json::from_str(&source.to_string()).expect("typed style");
+    let encoded = serde_json::to_string(&typed).expect("serialize style");
+    let after: Value = serde_json::from_str(&encoded).expect("saved style JSON");
+    assert_eq!(after, source);
+    assert_numeric_bits(&source, &after);
 }
 
 fn assert_numeric_bits(before: &Value, after: &Value) {
@@ -95,6 +95,7 @@ fn image_boxes_in_node_strokes_and_widget_states_are_charged() {
     assert_eq!(
         node.boxed_optional_storage_bytes(),
         4 * std::mem::size_of::<ImageFillBody>()
+            + 2 * std::mem::size_of::<PenStrokeBody>()
             + std::mem::size_of::<crate::state_override::WidgetStates>()
     );
     assert_eq!(

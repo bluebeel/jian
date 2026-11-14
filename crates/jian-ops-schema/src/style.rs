@@ -306,6 +306,9 @@ pub struct ImageFillBody {
 
 // --- Stroke ---
 
+mod stroke_box;
+pub use stroke_box::PenStroke;
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
@@ -365,7 +368,7 @@ pub enum StrokeCap {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
-pub struct PenStroke {
+pub struct PenStrokeBody {
     pub thickness: StrokeThickness,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<StrokeAlign>,

@@ -21,7 +21,9 @@ fn style_storage(
     fills: Option<&[crate::style::PenFill]>,
     stroke: Option<&crate::style::PenStroke>,
 ) -> usize {
-    fill_storage(fills) + fill_storage(stroke.and_then(|stroke| stroke.fill.as_deref()))
+    fill_storage(fills)
+        + stroke.map_or(0, |_| std::mem::size_of::<crate::style::PenStrokeBody>())
+        + fill_storage(stroke.and_then(|stroke| stroke.fill.as_deref()))
 }
 fn state_fill_storage(states: &Option<Box<crate::state_override::WidgetStates>>) -> usize {
     let Some(states) = states.as_deref() else {
