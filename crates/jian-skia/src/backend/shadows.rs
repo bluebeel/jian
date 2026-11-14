@@ -21,9 +21,7 @@ pub(super) fn draw_shadowed_rect(
         if triangular(canvas, rect, radii, shadow, basis, c4) {
             return;
         }
-        crate::raster_sampling::mark_unsupported(
-            "triangular shadow with nonuniform radii or unavailable shader",
-        );
+        crate::raster_sampling::mark_unsupported("triangular shadow shader unavailable");
     }
     let mut paint = SkPaint::new(c4, None);
     crate::raster_sampling::configure_geometry(&mut paint);
@@ -61,9 +59,6 @@ fn triangular(
     basis: Option<&skia_safe::Matrix>,
     color: Color4f,
 ) -> bool {
-    if radii.tl != radii.tr || radii.tl != radii.br || radii.tl != radii.bl {
-        return false;
-    }
     let mut bounds = to_sk_rect(rect).with_outset((shadow.spread, shadow.spread));
     if bounds.is_empty() {
         return true;
@@ -82,6 +77,32 @@ fn triangular(
         _ => SkPoint::new(shadow.dx, shadow.dy),
     };
     bounds.offset(offset);
+    if radii.tl != radii.tr || radii.tl != radii.br || radii.tl != radii.bl {
+        let Some(corners) = jian_widgets::RoundRectShadowOptions::fitted_radii(
+            jian_widgets::Rect::xywh(rect.min_x(), rect.min_y(), rect.width(), rect.height()),
+            [radii.tl, radii.tr, radii.br, radii.bl],
+        ) else {
+            return false;
+        };
+        let grow = |r: f32| {
+            if r <= 0.0 {
+                0.0
+            } else {
+                (r + shadow.spread).max(0.0)
+            }
+        };
+        return crate::triangular_corner_shadow::draw(
+            canvas,
+            &crate::triangular_corner_shadow::CornerShadowDraw {
+                bounds,
+                radii: corners.map(grow),
+                blur: shadow.blur,
+                color,
+                inner: false,
+                draw_bounds: bounds.with_outset((shadow.blur, shadow.blur)),
+            },
+        );
+    }
     crate::triangular_shadow::draw(
         canvas,
         &crate::triangular_shadow::RoundedShadowDraw {

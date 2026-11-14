@@ -83,6 +83,9 @@ impl CanvasKitBackend {
     pub async fn load(canvas: HtmlCanvasElement, asset_base: &str) -> Result<Self, JsValue> {
         let runtime = canvaskit::load(asset_base).await?;
         runtime.set_shadow_kernel_source(jian_core::render::shadow::TRIANGULAR_SHADOW_SHADER);
+        runtime.set_corner_shadow_kernel_source(
+            jian_core::render::shadow::TRIANGULAR_CORNER_SHADOW_SHADER,
+        );
         if !runtime.register_font(
             "Roboto",
             "Roboto",

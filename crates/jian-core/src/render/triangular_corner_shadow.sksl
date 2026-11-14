@@ -1,0 +1,70 @@
+uniform float4 bounds;
+uniform float4 radii;
+uniform float blur;
+uniform float inner;
+uniform float4 tint;
+
+float triangularCDF(float x) {
+    float remaining = 1.0 - min(abs(x), 1.0);
+    float tail = 0.5 * remaining * remaining;
+    return x < 0.0 ? tail : 1.0 - tail;
+}
+float4 fittedRadii(float2 size) {
+    float4 r = max(radii, 0.0);
+    float scale = 1.0;
+    if (r.x+r.y > size.x) scale = min(scale,size.x/(r.x+r.y));
+    if (r.w+r.z > size.x) scale = min(scale,size.x/(r.w+r.z));
+    if (r.x+r.w > size.y) scale = min(scale,size.y/(r.x+r.w));
+    if (r.y+r.z > size.y) scale = min(scale,size.y/(r.y+r.z));
+    return r * scale;
+}
+// Horizontal section of a circular-corner silhouette, with TL/TR/BR/BL radii.
+float2 section(float y, float2 h, float4 r) {
+    float left = -h.x, right = h.x;
+    if (y < -h.y+r.x) {
+        float dy = y-(-h.y+r.x);
+        left += r.x-sqrt(max(r.x*r.x-dy*dy,0.0));
+    } else if (y > h.y-r.w) {
+        float dy = y-(h.y-r.w);
+        left += r.w-sqrt(max(r.w*r.w-dy*dy,0.0));
+    }
+    if (y < -h.y+r.y) {
+        float dy = y-(-h.y+r.y);
+        right -= r.y-sqrt(max(r.y*r.y-dy*dy,0.0));
+    } else if (y > h.y-r.z) {
+        float dy = y-(h.y-r.z);
+        right -= r.z-sqrt(max(r.z*r.z-dy*dy,0.0));
+    }
+    return float2(left,right);
+}
+float silhouette(float2 p) {
+    float2 size = bounds.zw-bounds.xy;
+    if (any(lessThanEqual(size,float2(0.0)))) return 0.0;
+    float2 h = size * 0.5;
+    float4 r = fittedRadii(size);
+    p -= (bounds.xy+bounds.zw)*0.5;
+    if (blur <= 0.0) {
+        float2 edges = section(p.y,h,r);
+        return abs(p.y)<=h.y && p.x>=edges.x && p.x<=edges.y ? 1.0 : 0.0;
+    }
+    p /= blur; h /= blur; r /= blur;
+    if (any(greaterThan(abs(p),h+1.0))) return 0.0;
+    float largest=max(max(r.x,r.y),max(r.z,r.w));
+    if (all(lessThan(abs(p),h-largest-1.0))) return 1.0;
+    if (abs(p.y)>abs(p.x)) { p=p.yx; h=h.yx; r=r.xwzy; }
+    float lo=max(-1.0,p.y-h.y), hi=min(1.0,p.y+h.y);
+    if (hi<=lo) return 0.0;
+    float step=(hi-lo)*0.25, sum=0.0, weights=0.0;
+    for (int slice=0;slice<4;++slice) {
+        float position=lo+(float(slice)+0.5)*step;
+        float2 edges=section(p.y-position,h,r);
+        float weight=1.0-abs(position);
+        sum+=weight*(triangularCDF(p.x-edges.x)-triangularCDF(p.x-edges.y));
+        weights+=weight;
+    }
+    return sum*((triangularCDF(hi)-triangularCDF(lo))/weights);
+}
+half4 main(float2 p) {
+    float coverage=silhouette(p);
+    return half4(tint*(inner==1.0 ? 1.0-coverage : coverage));
+}

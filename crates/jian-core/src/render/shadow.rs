@@ -7,6 +7,7 @@ pub use jian_ops_schema::style::ShadowBlurKernel;
 /// other axis; square corners have an exact closed form. This source is shared
 /// by native Skia and CanvasKit and has no framebuffer-specific noise phase.
 pub const TRIANGULAR_SHADOW_SHADER: &str = include_str!("triangular_shadow.sksl");
+pub const TRIANGULAR_CORNER_SHADOW_SHADER: &str = include_str!("triangular_corner_shadow.sksl");
 
 /// Preserve functional color precision alongside the legacy packed fallback.
 /// Hex callers keep exactly the old packed-color path.

@@ -99,8 +99,15 @@ export function jianShadowOffset(current, basis, dx, dy) {
   return result.every(Number.isFinite) ? result : [dx, dy];
 }
 
-export function jianDrawTriangularShadow(ck, canvas, kernel, rect, radii, shadow, basis) {
-  if (shadow[8] !== 1 || !(shadow[2] > 0) || !radii.every(r => r === radii[0])) return false;
+function jianFitShadowCorners(w,h,corners) {
+  const r=corners.map(v=>Math.max(0,v)); let scale=1;
+  for (const [sum,extent] of [[r[0]+r[1],w],[r[3]+r[2],w],[r[0]+r[3],h],[r[1]+r[2],h]]) {
+    if (sum>extent) scale=Math.min(scale,extent/sum);
+  }
+  return r.map(v=>Math.fround(v*scale));
+}
+export function jianDrawTriangularShadow(ck, canvas, kernel, rect, radii, shadow, basis, cornerKernel) {
+  if (shadow[8] !== 1 || !(shadow[2] > 0)) return false;
   if (![...rect, ...radii, ...shadow].every(Number.isFinite)) return false;
   const f = Math.fround, spread = shadow[3];
   const [dx, dy] = jianShadowOffset(canvas.getTotalMatrix?.(), basis, shadow[0], shadow[1]);
@@ -108,10 +115,13 @@ export function jianDrawTriangularShadow(ck, canvas, kernel, rect, radii, shadow
   const w = f(rect[2] + f(spread * 2)), h = f(rect[3] + f(spread * 2));
   if (!(w > 0 && h > 0)) return true;
   const radius = radii[0] <= 0 ? 0 : Math.min(Math.max(0, f(radii[0] + spread)), Math.min(w, h) * 0.5);
+  const uniform = radii.every(r=>r===radii[0]);
+  const corners = uniform ? radii : jianFitShadowCorners(rect[2],rect[3],radii)
+    .map(r=>r<=0 ? 0 : Math.max(0,f(r+spread)));
   let shader = null, paint = null;
   try {
     const alpha = shadow[7];
-    shader = kernel.make({ bounds: [x, y, f(x + w), f(y + h)], radius: [radius],
+    shader = (uniform ? kernel : cornerKernel)?.make({ bounds: [x, y, f(x + w), f(y + h)], radius: [radius],radii:corners,
       blur: [shadow[2]], inner: [0], tint: [f(shadow[4] * alpha), f(shadow[5] * alpha), f(shadow[6] * alpha), alpha] });
     if (!shader) return false;
     paint = new ck.Paint(); paint.setAntiAlias(false);
@@ -130,12 +140,14 @@ class Runtime {
     this.fontMgr = null;
     this.coverage = new Map();
     this.shadowKernel = new JianShadowKernel(ck);
+    this.cornerShadowKernel = new JianShadowKernel(ck);
     this.failNextSurface = false;
     this.disposed = false;
   }
 
   registeredFontCount() { return this.fonts.size; }
   setShadowKernelSource(source) { this.shadowKernel.setSource(source); }
+  setCornerShadowKernelSource(source) { this.cornerShadowKernel.setSource(source); }
 
   dispose() {
     if (this.disposed) return;
@@ -148,6 +160,7 @@ class Runtime {
     this.fonts.clear();
     this.coverage.clear();
     this.shadowKernel.dispose();
+    this.cornerShadowKernel.dispose();
     this.ck = null;
   }
 
@@ -590,7 +603,8 @@ class Surface {
   }
 
   drawShadow(rect, radii, shadow) {
-    if (jianDrawTriangularShadow(this.ck, this.canvas, this.runtime.shadowKernel, rect, radii, shadow, this.shadowBasis)) return;
+    if (jianDrawTriangularShadow(this.ck, this.canvas, this.runtime.shadowKernel, rect, radii, shadow, this.shadowBasis,
+      this.runtime.cornerShadowKernel)) return;
     const spread = shadow[3];
     const path = this.rrect([
       rect[0] + shadow[0] - spread,
