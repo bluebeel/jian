@@ -1,208 +1,14 @@
 //! Platform-neutral painter contract for immediate-mode widgets.
 
 use crate::geometry::{fold_alpha, Color, Point2D, Rect};
-use jian_core::render::{TextAlign, TextRun};
 mod image_options;
-pub use image_options::{ImagePaintOptions, ImagePaintThumbnail};
-
-/// Text layout passed through to a backend-owned text renderer.
-#[derive(Debug, Clone)]
-pub struct TextLayout {
-    runs: Vec<TextRun>,
-    source_color: Option<Color>,
-    italic: bool,
-    kerning: Option<bool>,
-    letter_spacing: f32,
-    font_features: std::collections::BTreeMap<String, u32>,
-}
-
-/// Inputs used to locate the first alphabetic baseline inside a text line.
-///
-/// `line_height` is the authored multiplier (`0` means backend default).
-/// Including the actual line text lets a backend resolve the same fallback
-/// face used for CJK/emoji paint instead of sampling an unrelated Latin glyph.
-#[derive(Debug, Clone, Copy)]
-pub struct TextBaselineRequest<'a> {
-    pub text: &'a str,
-    pub font_family: &'a str,
-    pub font_size: f32,
-    pub font_weight: u16,
-    pub italic: bool,
-    pub line_height: f32,
-}
-
-/// Raster image placement mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ImageDrawMode {
-    #[default]
-    Fill,
-    Fit,
-    Crop,
-    Tile,
-    Stretch,
-}
-
-/// Compositing mode applied to an isolated paint layer or raster image.
-///
-/// `Normal` preserves the historical source-over behaviour. The remaining
-/// variants mirror the blend modes supported by the canonical `.op` schema
-/// and map directly onto Skia / CanvasKit paint modes in host backends.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ImageBlendMode {
-    #[default]
-    Normal,
-    Darken,
-    Multiply,
-    Screen,
-    Overlay,
-    Lighten,
-    Difference,
-    Hue,
-    Saturation,
-    Color,
-    Luminosity,
-    SoftLight,
-    ColorDodge,
-    ColorBurn,
-    HardLight,
-    Exclusion,
-}
-
-/// Per-image adjustment values in the UI slider range `[-100, 100]`.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct ImageAdjustments {
-    pub exposure: f32,
-    pub contrast: f32,
-    pub saturation: f32,
-    pub temperature: f32,
-    pub tint: f32,
-    pub highlights: f32,
-    pub shadows: f32,
-}
-
-impl ImageAdjustments {
-    pub fn is_neutral(self) -> bool {
-        self.exposure == 0.0
-            && self.contrast == 0.0
-            && self.saturation == 0.0
-            && self.temperature == 0.0
-            && self.tint == 0.0
-            && self.highlights == 0.0
-            && self.shadows == 0.0
-    }
-}
-
-impl TextLayout {
-    pub fn single_run(
-        content: &str,
-        font_family: &str,
-        font_size: f32,
-        color: jian_core::scene::Color,
-        origin: Point2D,
-    ) -> Self {
-        let run = TextRun {
-            content: content.to_string(),
-            font_family: font_family.to_string(),
-            font_size,
-            font_weight: 400,
-            color,
-            origin: jian_core::geometry::Point::new(origin.x, origin.y),
-            max_width: 0.0,
-            align: TextAlign::Start,
-            line_height: 0.0,
-        };
-        Self {
-            runs: vec![run],
-            source_color: None,
-            italic: false,
-            kerning: None,
-            letter_spacing: 0.0,
-            font_features: Default::default(),
-        }
-    }
-
-    /// Original float paint for hosts whose correlated source stage must
-    /// avoid narrowing a color through the legacy packed TextRun contract.
-    pub fn with_source_color(mut self, color: Color) -> Self {
-        self.source_color = Some(color);
-        self
-    }
-
-    pub fn source_color(&self) -> Option<Color> {
-        self.source_color
-    }
-
-    pub fn runs(&self) -> &[TextRun] {
-        &self.runs
-    }
-
-    pub fn with_font_weight(mut self, weight: u16) -> Self {
-        for r in &mut self.runs {
-            r.font_weight = weight;
-        }
-        self
-    }
-
-    pub fn with_italic(mut self, italic: bool) -> Self {
-        self.italic = italic;
-        self
-    }
-
-    pub fn italic(&self) -> bool {
-        self.italic
-    }
-
-    pub fn with_kerning(mut self, kerning: Option<bool>) -> Self {
-        self.kerning = kerning;
-        self
-    }
-
-    pub fn kerning(&self) -> Option<bool> {
-        self.kerning
-    }
-
-    pub fn with_letter_spacing(mut self, spacing: f32) -> Self {
-        self.letter_spacing = spacing;
-        self
-    }
-
-    pub fn letter_spacing(&self) -> f32 {
-        self.letter_spacing
-    }
-
-    pub fn with_font_features(
-        mut self,
-        features: &std::collections::BTreeMap<String, u32>,
-    ) -> Self {
-        self.font_features = features.clone();
-        self
-    }
-
-    pub fn font_features(&self) -> &std::collections::BTreeMap<String, u32> {
-        &self.font_features
-    }
-
-    pub fn translated(&self, offset: Point2D) -> Self {
-        let runs = self
-            .runs
-            .iter()
-            .map(|r| {
-                let mut r2 = r.clone();
-                r2.origin =
-                    jian_core::geometry::Point::new(r.origin.x + offset.x, r.origin.y + offset.y);
-                r2
-            })
-            .collect();
-        Self {
-            runs,
-            source_color: self.source_color,
-            italic: self.italic,
-            kerning: self.kerning,
-            letter_spacing: self.letter_spacing,
-            font_features: self.font_features.clone(),
-        }
-    }
-}
+mod text_decoration;
+mod text_layout;
+pub use image_options::{
+    ImageAdjustments, ImageBlendMode, ImageDrawMode, ImagePaintOptions, ImagePaintThumbnail,
+};
+pub use text_decoration::TextDecorationRequest;
+pub use text_layout::{TextBaselineRequest, TextLayout};
 
 /// Backend abstraction used by cross-platform widgets.
 pub trait Painter {
@@ -212,6 +18,11 @@ pub trait Painter {
     fn fill_rect(&mut self, rect: Rect, color: Color);
     fn stroke_rect(&mut self, rect: Rect, color: Color, width: f32);
     fn draw_text(&mut self, layout: &TextLayout, origin: Point2D);
+    /// Return true after painting metric-based decorations; false lets the
+    /// caller retain its portable legacy fallback.
+    fn draw_text_decoration(&mut self, _request: &TextDecorationRequest<'_>) -> bool {
+        false
+    }
     fn clip_rect(&mut self, rect: Rect);
 
     fn clip_round_rect(&mut self, rect: Rect, radius: f32) {

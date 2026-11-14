@@ -16,7 +16,7 @@ pub(crate) mod test_support;
 pub use geometry::{Color, Point2D, Rect};
 pub use painter::{
     ImageAdjustments, ImageBlendMode, ImageDrawMode, ImagePaintOptions, ImagePaintThumbnail,
-    Painter, TextBaselineRequest, TextLayout,
+    Painter, TextBaselineRequest, TextDecorationRequest, TextLayout,
 };
 pub use tokens::{Density, Tokens};
 

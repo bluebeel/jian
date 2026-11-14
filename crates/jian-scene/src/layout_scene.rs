@@ -450,6 +450,7 @@ pub struct SceneTextRun {
     pub underline: bool,
     /// Stroke a strikethrough across this run's painted slices.
     pub strikethrough: bool,
+    pub text_decoration_skip_ink: Option<bool>,
 }
 
 /// Video playback metadata carried by an image poster in the render scene.
@@ -568,6 +569,7 @@ pub struct SceneNode {
     pub underline: bool,
     /// Node-level strikethrough decoration.
     pub strikethrough: bool,
+    pub text_decoration_skip_ink: Option<bool>,
     /// Line-height multiplier (`1.2` = 120%). `0.0` = renderer default.
     pub line_height: f32,
     /// Extra tracking in doc-px between glyphs.

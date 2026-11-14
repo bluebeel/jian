@@ -103,6 +103,9 @@ pub struct TextNode {
     pub underline: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strikethrough: Option<bool>,
+    /// Whether underlines leave gaps around descender ink; absent is legacy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_decoration_skip_ink: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<Vec<PenFill>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

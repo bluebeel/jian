@@ -177,6 +177,7 @@ impl SceneNode {
             italic: false,
             underline: false,
             strikethrough: false,
+            text_decoration_skip_ink: None,
             line_height: 0.0,
             letter_spacing: 0.0,
             text_align: SceneTextAlign::Left,
