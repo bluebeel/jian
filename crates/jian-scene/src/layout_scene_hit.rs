@@ -85,7 +85,7 @@ impl LayoutScene {
         None
     }
 
-    /// Top-level node ids on the active page whose aggregate bounds
+    /// Visible, unlocked top-level node ids whose rotated selection bounds
     /// intersect `rect` (doc space). Backs the marquee rect-select.
     /// Descends only into top-level children — same as the click
     /// hit-test, so the result set selects as a unit.
@@ -99,22 +99,66 @@ impl LayoutScene {
         let nh = rect.size.y.abs();
         let mut out = Vec::new();
         for child in &page.children {
-            let b = child.aggregate_bounds();
-            if b.size.x <= 0.0 && b.size.y <= 0.0 {
+            if child.hidden || child.locked {
                 continue;
             }
-            let bx = b.origin.x.min(b.origin.x + b.size.x);
-            let by = b.origin.y.min(b.origin.y + b.size.y);
-            let bw = b.size.x.abs();
-            let bh = b.size.y.abs();
+            let Some([bx, by, right, bottom]) = selection_aabb(child) else {
+                continue;
+            };
             // AABB intersection test.
-            if bx + bw < nx || nx + nw < bx || by + bh < ny || ny + nh < by {
+            if right < f64::from(nx)
+                || f64::from(nx) + f64::from(nw) < bx
+                || bottom < f64::from(ny)
+                || f64::from(ny) + f64::from(nh) < by
+            {
                 continue;
             }
             out.push(child.id.clone());
         }
         out
     }
+}
+
+fn selection_aabb(node: &SceneNode) -> Option<[f64; 4]> {
+    let aggregate = node.aggregate_bounds();
+    let bounds = if matches!(node.kind, NodeKind::Line) {
+        node.bounds
+    } else {
+        aggregate
+    };
+    let (x, y) = (f64::from(bounds.origin.x), f64::from(bounds.origin.y));
+    let (w, h) = (f64::from(bounds.size.x), f64::from(bounds.size.y));
+    if ![x, y, w, h].iter().all(|v| v.is_finite()) || (w == 0.0 && h == 0.0) {
+        return None;
+    }
+    let mut out = [x.min(x + w), y.min(y + h), x.max(x + w), y.max(y + h)];
+    if node.rotation.abs() > f32::EPSILON {
+        let pivot = rotation_pivot(node, aggregate)?;
+        let (px, py) = (f64::from(pivot.x), f64::from(pivot.y));
+        let (cos, sin) = (
+            f64::from(node.rotation.cos()),
+            f64::from(node.rotation.sin()),
+        );
+        out = [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for cx in [x, x + w] {
+            for cy in [y, y + h] {
+                let dx = cx - px;
+                let dy = cy - py;
+                let rx = px + dx * cos - dy * sin;
+                let ry = py + dx * sin + dy * cos;
+                out[0] = out[0].min(rx);
+                out[1] = out[1].min(ry);
+                out[2] = out[2].max(rx);
+                out[3] = out[3].max(ry);
+            }
+        }
+    }
+    out.iter().all(|v| v.is_finite()).then_some(out)
 }
 
 /// Recursive hit-test — returns the topmost id whose geometry
@@ -294,7 +338,9 @@ fn point_in_node(
             }
         }
         // A filled closed path is also hittable across its interior.
-        return node.path_closed && node.fill.is_some() && point_in_polygon(local, points);
+        return node.path_closed
+            && (node.fill.is_some() || !node.fill_layers.is_empty())
+            && point_in_path(local, points, node.even_odd_fill);
     }
     // A container that paints nothing does not claim its own body. This
     // runs after the child walk in both walkers, so descendants stay
@@ -385,19 +431,36 @@ fn path_hit_points(node: &SceneNode) -> PathPoints<'_> {
 
 /// Even-odd ray-cast point-in-polygon test over a closed vertex ring.
 fn point_in_polygon(p: Point2D, poly: &[Point2D]) -> bool {
+    point_in_path(p, poly, true)
+}
+
+fn point_in_path(p: Point2D, poly: &[Point2D], even_odd: bool) -> bool {
     if poly.len() < 3 {
         return false;
     }
-    let mut inside = false;
+    let mut winding = 0_i64;
     let mut j = poly.len() - 1;
     for i in 0..poly.len() {
-        let (a, b) = (poly[i], poly[j]);
-        if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
-            inside = !inside;
+        let (a, b) = (poly[j], poly[i]);
+        // Rebase to the query before products: world-coordinate offsets do
+        // not affect winding precision, including on distant imported pages.
+        let ax = f64::from(a.x) - f64::from(p.x);
+        let ay = f64::from(a.y) - f64::from(p.y);
+        let bx = f64::from(b.x) - f64::from(p.x);
+        let by = f64::from(b.y) - f64::from(p.y);
+        let cross = ax * by - bx * ay;
+        if ay <= 0.0 && by > 0.0 && cross > 0.0 {
+            winding += 1;
+        } else if ay > 0.0 && by <= 0.0 && cross < 0.0 {
+            winding -= 1;
         }
         j = i;
     }
-    inside
+    if even_odd {
+        winding % 2 != 0
+    } else {
+        winding != 0
+    }
 }
 
 /// Shortest distance from `p` to the segment `a`–`b`.
