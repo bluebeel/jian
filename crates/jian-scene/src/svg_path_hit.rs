@@ -182,7 +182,8 @@ pub(super) fn contains(node: &SceneNode, point: Point2D, zoom: f32) -> bool {
     // Preserve the editor's screen-pixel edge slack and evaluate it after
     // nonuniform fitting, without flattening curves or joining subpaths.
     let transform = Affine::new([sx, 0.0, 0.0, sy, -x0 * sx, -y0 * sy]);
-    geometry.outline.segments().any(|segment| {
+    let hit = geometry.outline.segments().any(|segment| {
         (transform * segment).nearest(local, 0.01).distance_sq <= tolerance * tolerance
-    })
+    });
+    hit
 }
