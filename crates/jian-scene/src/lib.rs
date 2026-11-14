@@ -16,4 +16,4 @@ pub use layout_scene::{SceneTextAlign, SceneTextVerticalAlign};
 pub mod snapping;
 
 mod stroke_paint;
-pub use stroke_paint::SceneStrokePaint;
+pub use stroke_paint::{SceneStrokePaint, StrokePaintCap, StrokePaintJoin, StrokePaintStyle};

@@ -2,8 +2,9 @@
 //! existing Copy descriptor and rendering path without extra paint allocation.
 
 use crate::layout_scene::SceneFillLayer;
+pub use jian_widgets::{StrokePaintCap, StrokePaintJoin, StrokePaintStyle};
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneStrokePaint {
     pub layers: Vec<SceneFillLayer>,
-    pub style: jian_widgets::StrokePaintStyle,
+    pub style: StrokePaintStyle,
 }
