@@ -52,19 +52,9 @@ pub struct ResolvedTypeface {
     pub synthetic_italic: bool,
 }
 
-#[derive(Default)]
-struct FontResolverCache {
-    chars: HashMap<FontKey, Option<ResolvedTypeface>>,
-    weights: HashMap<(u32, u16), Typeface>,
-}
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct FontKey {
-    families: Vec<String>,
-    codepoint: i32,
-    weight: u16,
-    italic: bool,
-}
+#[path = "font_resolve_cache.rs"]
+mod cache;
+use cache::{FontKey, FontResolverCache};
 
 /// Shared typeface resolver for Skia-backed text paths.
 ///
@@ -223,22 +213,19 @@ impl FontResolver {
         italic: bool,
     ) -> Option<ResolvedTypeface> {
         self.refresh_if_stale();
-        let families = font_family_candidates(family);
+        let families = self.prepared_families(family);
         self.typeface_for_char_in_families(&families, c, weight, italic)
     }
 
     fn typeface_for_char_in_families(
         &self,
-        families: &[String],
+        families: &cache::Families,
         c: char,
         weight: u16,
         italic: bool,
     ) -> Option<ResolvedTypeface> {
         let key = FontKey {
-            families: families
-                .iter()
-                .map(|family| family.to_ascii_lowercase())
-                .collect(),
+            families: std::sync::Arc::clone(&families.folded),
             codepoint: c as i32,
             weight,
             italic,
@@ -249,8 +236,9 @@ impl FontResolver {
         // Cache miss → `match_family_style_character` (DirectWrite system font
         // scan on Windows). Serialize just this call so the per-char cached
         // fast path above stays lock-free.
-        let resolved =
-            crate::font_lock::with_font_lock(|| self.resolve_uncached(families, c, weight, italic));
+        let resolved = crate::font_lock::with_font_lock(|| {
+            self.resolve_uncached(&families.raw, c, weight, italic)
+        });
         self.cache.borrow_mut().chars.insert(key, resolved.clone());
         resolved
     }
@@ -263,7 +251,7 @@ impl FontResolver {
         italic: bool,
     ) -> Vec<FontSegment> {
         self.refresh_if_stale();
-        let families = font_family_candidates(family);
+        let families = self.prepared_families(family);
         let mut segments: Vec<FontSegment> = Vec::new();
         for c in text.chars() {
             let Some(resolved) = self.typeface_for_char_in_families(&families, c, weight, italic)
