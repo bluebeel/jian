@@ -70,7 +70,7 @@ fn visit_own_sources<'a>(
     macro_rules! widget_style {
         ($node:expr) => {{
             style!($node);
-            visit_states($node.states.as_ref(), visit);
+            visit_states($node.states.as_deref(), visit);
         }};
     }
 

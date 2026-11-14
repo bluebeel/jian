@@ -84,7 +84,7 @@ pub struct PenNodeBase {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub transition: Option<crate::motion::Transition>,
+    pub transition: Option<Box<crate::motion::Transition>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animations: Option<Vec<crate::motion::NodeAnimation>>,
 }
