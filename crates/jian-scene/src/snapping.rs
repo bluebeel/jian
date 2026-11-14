@@ -109,6 +109,33 @@ pub struct SnapIndex {
     y: [Vec<Anchor>; 3],
 }
 impl SnapIndex {
+    /// Owned index capacity, including unused Vec slots and target IDs.
+    pub fn storage_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(
+                self.targets
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<SnapTarget>()),
+            )
+            .saturating_add(
+                self.targets
+                    .iter()
+                    .map(|target| target.id.capacity())
+                    .sum::<usize>(),
+            )
+            .saturating_add(
+                self.x
+                    .iter()
+                    .chain(&self.y)
+                    .map(|anchors| {
+                        anchors
+                            .capacity()
+                            .saturating_mul(std::mem::size_of::<Anchor>())
+                    })
+                    .sum::<usize>(),
+            )
+    }
+
     pub fn new(targets: impl IntoIterator<Item = SnapTarget>) -> Self {
         let mut index = Self {
             targets: Vec::new(),
