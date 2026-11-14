@@ -222,6 +222,13 @@ pub trait Painter {
         );
     }
 
+    /// Map a canvas-space shadow displacement into the current shape space.
+    /// Transform-aware backends keep effect offsets independent of node rotation
+    /// and reflection; simple painters retain their existing coordinate space.
+    fn shadow_offset_in_local_space(&self, offset: Point2D) -> Point2D {
+        offset
+    }
+
     fn fill_drop_shadow(&mut self, rect: Rect, radius: f32, blur: f32, color: Color) {
         let _ = blur;
         self.fill_round_rect(rect, radius, color);
