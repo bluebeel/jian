@@ -9,6 +9,31 @@ pub use jian_ops_schema::style::ShadowBlurKernel;
 pub const TRIANGULAR_SHADOW_SHADER: &str = include_str!("triangular_shadow.sksl");
 pub const TRIANGULAR_CORNER_SHADOW_SHADER: &str = include_str!("triangular_corner_shadow.sksl");
 
+/// Proportionally fit circular corners to all four silhouette edges.
+pub fn fitted_corner_radii(size: [f32; 2], radii: [f32; 4]) -> Option<[f32; 4]> {
+    let w = f64::from(size[0]);
+    let h = f64::from(size[1]);
+    if !(w > 0.0 && h > 0.0)
+        || ![w, h].iter().all(|v| v.is_finite())
+        || !radii.iter().all(|v| v.is_finite())
+    {
+        return None;
+    }
+    let r = radii.map(|v| f64::from(v.max(0.0)));
+    let mut scale = 1.0_f64;
+    for (sum, extent) in [
+        (r[0] + r[1], w),
+        (r[3] + r[2], w),
+        (r[0] + r[3], h),
+        (r[1] + r[2], h),
+    ] {
+        if sum > extent {
+            scale = scale.min(extent / sum);
+        }
+    }
+    Some(r.map(|v| (v * scale) as f32))
+}
+
 /// Preserve functional color precision alongside the legacy packed fallback.
 /// Hex callers keep exactly the old packed-color path.
 pub fn parse_shadow_color(source: &str) -> Option<(crate::scene::Color, Option<[f32; 4]>)> {

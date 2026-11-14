@@ -78,8 +78,8 @@ fn triangular(
     };
     bounds.offset(offset);
     if radii.tl != radii.tr || radii.tl != radii.br || radii.tl != radii.bl {
-        let Some(corners) = jian_widgets::RoundRectShadowOptions::fitted_radii(
-            jian_widgets::Rect::xywh(rect.min_x(), rect.min_y(), rect.width(), rect.height()),
+        let Some(corners) = jian_core::render::shadow::fitted_corner_radii(
+            [rect.width(), rect.height()],
             [radii.tl, radii.tr, radii.br, radii.bl],
         ) else {
             return false;
