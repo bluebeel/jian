@@ -299,6 +299,13 @@ pub trait Painter {
         self.save();
     }
 
+    /// Explicit SVG mask color space. Existing/custom implementations keep
+    /// their legacy sRGB behavior unless they override this additive hook.
+    fn push_mask_source_layer_with_color_space(&mut self, luminance: bool, linear_rgb: bool) {
+        let _ = linear_rgb;
+        self.push_mask_source_layer(luminance);
+    }
+
     /// Begin an isolated compositing layer. Draws until the matching
     /// [`Painter::restore`] are blended with the backdrop using `mode`.
     /// Backends without save-layer blend support degrade to source-over while

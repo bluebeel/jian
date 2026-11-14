@@ -159,6 +159,8 @@ pub struct SceneShaderUniform {
 /// `opacity` folds into the paint alpha.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneShader {
+    /// Typed imported gradient definition for vector export and exact cache keys.
+    pub gradient: Option<std::sync::Arc<jian_ops_schema::style::GradientPaint>>,
     pub sksl: String,
     pub uniforms: Vec<SceneShaderUniform>,
     pub opacity: f32,

@@ -32,6 +32,9 @@ pub enum MaskType {
     Alpha,
     Vector,
     Luminance,
+    /// SVG explicitly requests luminance after the sRGB transfer is decoded.
+    #[serde(rename = "luminance-linear")]
+    LuminanceLinear,
 }
 
 /// Shared fields across all node types.

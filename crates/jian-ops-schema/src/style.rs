@@ -1,3 +1,6 @@
+mod gradient_geometry;
+pub use gradient_geometry::*;
+
 use serde::{Deserialize, Serialize};
 
 // Persisted style numbers use JSON's f64 precision. Convert to f32 only when
@@ -104,6 +107,8 @@ pub struct SolidFillBody {
 #[serde(rename_all = "camelCase")]
 pub struct LinearGradientBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<Box<GradientGeometry>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub angle: Option<f64>,
     pub stops: Vec<GradientStop>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -119,6 +124,8 @@ pub struct LinearGradientBody {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct RadialGradientBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<Box<GradientGeometry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cx: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
