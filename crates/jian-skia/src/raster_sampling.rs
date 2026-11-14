@@ -7,8 +7,7 @@
 use skia_safe::{runtime_effect::ChildPtr, BlendMode, Blender, Data, Paint, RuntimeEffect};
 use std::{cell::Cell, fmt};
 
-const SOURCE: &str = r#"
-uniform blender operation;
+const HELPERS: &str = r#"
 float quantize(float value) {
     float scaled = clamp(value, 0.0, 1.0) * 255.0;
     float base = floor(scaled);
@@ -19,11 +18,26 @@ float quantize(float value) {
 float4 bytes(float4 value) {
     return float4(quantize(value.r), quantize(value.g), quantize(value.b), quantize(value.a));
 }
+float4 backdrop(half4 destination) {
+    // Every destination is an RGBA8 load. Its normalized float is within
+    // half a byte of the stored integer, so recovery needs no tie handling.
+    int4 stored = int4(clamp(float4(destination), 0.0, 1.0) * 255.0 + .5);
+    return float4(stored * 257) * (1.0 / 65535.0);
+}
+"#;
+const GENERAL: &str = r#"
+uniform blender operation;
 half4 main(half4 source, half4 destination) {
-    // RGBA8 framebuffer loads expand bytes to UNORM16 before float blending.
-    // Preserve integer expansion: multiplying by reciprocal255 changes ties.
-    float4 backdrop = float4(int4(bytes(float4(destination))) * 257) * (1.0 / 65535.0);
-    float4 result = float4(operation.eval(source, half4(backdrop)));
+    float4 result = float4(operation.eval(source, half4(backdrop(destination))));
+    return half4(bytes(result) / 255.0);
+}
+"#;
+const SOURCE_OVER: &str = r#"
+half4 main(half4 source, half4 destination) {
+    if (all(equal(source, half4(0.0)))) return destination;
+    if (source.a == 1.0) return half4(bytes(float4(source)) / 255.0);
+    float4 scaledBackdrop = backdrop(destination) * (1.0 - float(source.a));
+    float4 result = float4(source) + scaledBackdrop;
     return half4(bytes(result) / 255.0);
 }
 "#;
@@ -80,16 +94,24 @@ impl fmt::Display for PointSamplingError {
 impl std::error::Error for PointSamplingError {}
 
 fn make_blenders() -> Result<Vec<(BlendMode, Blender)>, PointSamplingError> {
-    let effect = RuntimeEffect::make_for_blender(SOURCE, None)
-        .map_err(|message| PointSamplingError::Compile { message })?;
+    let compile = |main: &str| {
+        RuntimeEffect::make_for_blender(&format!("{HELPERS}{main}"), None)
+            .map_err(|message| PointSamplingError::Compile { message })
+    };
+    let general = compile(GENERAL)?;
+    let source_over = compile(SOURCE_OVER)?;
     MODES
         .iter()
         .map(|&mode| {
-            effect
-                .make_blender(
+            let blender = if mode == BlendMode::SrcOver {
+                source_over.make_blender(Data::new_copy(&[]), None)
+            } else {
+                general.make_blender(
                     Data::new_copy(&[]),
                     &[ChildPtr::Blender(Blender::mode(mode))][..],
                 )
+            };
+            blender
                 .map(|blender| (mode, blender))
                 .ok_or(PointSamplingError::CreateBlender { mode })
         })
@@ -98,9 +120,29 @@ fn make_blenders() -> Result<Vec<(BlendMode, Blender)>, PointSamplingError> {
 
 thread_local! {
     static POINT: Cell<bool> = const { Cell::new(false) };
+    static EXPORT: Cell<bool> = const { Cell::new(false) };
     static UNSUPPORTED: Cell<Option<&'static str>> = const { Cell::new(None) };
     // A finite set of standard modes; no per-scene shader/program cache.
     static BLENDERS: Result<Vec<(BlendMode, Blender)>, PointSamplingError> = make_blenders();
+}
+
+/// Scene exports transform logical geometry through their canvas. Keep this
+/// separate from live widgets, whose callers may already scale blur values.
+pub fn with_scene_export<R>(draw: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            EXPORT.with(|export| export.set(self.0));
+        }
+    }
+    let restore = Restore(EXPORT.with(|export| export.replace(true)));
+    let result = draw();
+    drop(restore);
+    result
+}
+
+pub fn shadow_respects_ctm() -> bool {
+    is_point_sampling() || EXPORT.with(Cell::get)
 }
 
 pub fn is_point_sampling() -> bool {
@@ -155,6 +197,55 @@ pub fn configure_paint(paint: &mut Paint) {
                 }
             }
         });
+    }
+}
+
+/// Final preparation for a source-over draw. Call only after all shader,
+/// filter, color and opacity mutations. An unfiltered constant with alpha0/1
+/// has a backdrop-independent result; store its exact byte color once and
+/// let Skia use the ordinary skip/fill path instead of a per-pixel program.
+pub fn configure_final_src_over(paint: &mut Paint) {
+    if !is_point_sampling() {
+        return;
+    }
+    paint.set_anti_alias(false);
+    let color = paint.color4f();
+    if paint.shader().is_none()
+        && paint.color_filter().is_none()
+        && paint.mask_filter().is_none()
+        && paint.image_filter().is_none()
+        && (color.a == 0.0 || color.a == 1.0)
+    {
+        let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round_ties_even() as u8;
+        let color = if color.a == 0.0 {
+            skia_safe::Color::TRANSPARENT
+        } else {
+            skia_safe::Color::from_rgb(byte(color.r), byte(color.g), byte(color.b))
+        };
+        paint.set_color(color);
+        paint.set_blend_mode(BlendMode::SrcOver);
+    } else {
+        set_blend_mode(paint, BlendMode::SrcOver);
+    }
+}
+
+/// A point-image shader may promise byte-normalized colors and binary alpha.
+/// With full paint opacity and no filters, ordinary SrcOver then has exactly
+/// the same byte result for every backdrop and avoids a redundant quantizer.
+pub fn configure_final_byte_image(paint: &mut Paint, binary_alpha: bool) {
+    if !is_point_sampling() {
+        return;
+    }
+    paint.set_anti_alias(false);
+    if binary_alpha
+        && paint.color4f().a == 1.0
+        && paint.color_filter().is_none()
+        && paint.image_filter().is_none()
+        && paint.mask_filter().is_none()
+    {
+        paint.set_blend_mode(BlendMode::SrcOver);
+    } else {
+        set_blend_mode(paint, BlendMode::SrcOver);
     }
 }
 

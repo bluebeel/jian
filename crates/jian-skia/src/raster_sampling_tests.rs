@@ -93,3 +93,136 @@ fn correlated_mode_cache_is_finite_and_all_standard_blends_are_available() {
     assert!(legacy.is_anti_alias());
     assert_eq!(legacy.as_blend_mode(), Some(BlendMode::SrcOver));
 }
+
+fn reference_source_over() -> Blender {
+    let effect = RuntimeEffect::make_for_blender(&format!("{HELPERS}{GENERAL}"), None).unwrap();
+    effect
+        .make_blender(
+            Data::new_copy(&[]),
+            &[ChildPtr::Blender(Blender::mode(BlendMode::SrcOver))][..],
+        )
+        .unwrap()
+}
+fn painted(
+    mut paint: Paint,
+    reference: &Blender,
+    fast: bool,
+    byte_shader: Option<bool>,
+) -> Vec<u8> {
+    let mut surface = skia_safe::surfaces::raster_n32_premul((12, 12)).unwrap();
+    surface
+        .canvas()
+        .clear(skia_safe::Color::from_argb(173, 27, 74, 133));
+    if fast {
+        if let Some(binary) = byte_shader {
+            configure_final_byte_image(&mut paint, binary);
+        } else {
+            configure_final_src_over(&mut paint);
+        }
+    } else {
+        paint.set_blender(reference.clone());
+    }
+    surface
+        .canvas()
+        .draw_rect(Rect::from_xywh(0.125, 0.375, 10.5, 10.25), &paint);
+    surface
+        .image_snapshot()
+        .peek_pixels()
+        .unwrap()
+        .bytes()
+        .unwrap()
+        .to_vec()
+}
+
+#[test]
+fn correlated_final_solids_keep_framebuffer_ties_and_mask_filter_behavior() {
+    let reference = reference_source_over();
+    with_point_sampling(|| {
+        for value in 0..255 {
+            for alpha in [0.0, 0.35, 1.0] {
+                let paint = Paint::new(
+                    Color4f::new((value as f32 + 0.5) / 255.0, 0.375, 0.8125, alpha),
+                    None,
+                );
+                assert_eq!(
+                    painted(paint.clone(), &reference, true, None),
+                    painted(paint, &reference, false, None),
+                    "byte{value},alpha{alpha}"
+                );
+            }
+        }
+        let mut filtered = Paint::new(Color4f::new(0.73125, 0.45625, 0.2175, 1.0), None);
+        filtered.set_mask_filter(skia_safe::MaskFilter::blur(
+            skia_safe::BlurStyle::Normal,
+            1.25,
+            false,
+        ));
+        assert_eq!(
+            painted(filtered.clone(), &reference, true, None),
+            painted(filtered, &reference, false, None)
+        );
+    })
+    .unwrap();
+}
+
+#[test]
+fn correlated_byte_image_fast_path_excludes_decal_filter_and_opacity_alpha() {
+    let reference = reference_source_over();
+    let info = ImageInfo::new((2, 2), ColorType::RGBA8888, AlphaType::Opaque, None);
+    let image = skia_safe::images::raster_from_data(
+        &info,
+        Data::new_copy(&[44, 127, 206, 255].repeat(4)),
+        8,
+    )
+    .unwrap();
+    assert!(image.is_opaque());
+    with_point_sampling(|| {
+        for decal in [false, true] {
+            for opacity in [0.35, 1.0] {
+                for filter in [false, true] {
+                    let mode = if decal {
+                        skia_safe::TileMode::Decal
+                    } else {
+                        skia_safe::TileMode::Clamp
+                    };
+                    let sampling = if decal {
+                        skia_safe::SamplingOptions::new(
+                            skia_safe::FilterMode::Linear,
+                            skia_safe::MipmapMode::None,
+                        )
+                    } else {
+                        skia_safe::SamplingOptions::default()
+                    };
+                    let shader = image
+                        .to_shader(
+                            (mode, mode),
+                            sampling,
+                            &skia_safe::Matrix::scale((3.0, 3.0)),
+                        )
+                        .unwrap();
+                    let mut paint = Paint::default();
+                    paint.set_shader(shader);
+                    paint.set_alpha_f(opacity);
+                    if filter {
+                        let mut matrix = [0.0_f32; 20];
+                        matrix[0] = 1.0;
+                        matrix[6] = 1.0;
+                        matrix[12] = 1.0;
+                        matrix[18] = 0.35;
+                        paint.set_color_filter(skia_safe::color_filters::matrix_row_major(
+                            &matrix, None,
+                        ));
+                    }
+                    // AlphaTypeOpaque alone does not certify filtered Decal output.
+                    let binary = !decal;
+                    assert_eq!(
+                        painted(paint.clone(), &reference, true, Some(binary)),
+                        painted(paint, &reference, false, None),
+                        "decal{decal},opacity{opacity},filter{filter}"
+                    );
+                }
+            }
+        }
+    })
+    .unwrap();
+}
