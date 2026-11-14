@@ -42,6 +42,13 @@ pub enum MaskType {
 #[serde(rename_all = "camelCase")]
 pub struct PenNodeBase {
     pub id: String,
+    /// Presence bits for explicit-null geometry in a canonical `PenNode`.
+    /// Numeric setters take precedence when serializing; this never changes
+    /// the `Option` values consumed by layout or rendering.
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[cfg_attr(feature = "export-ts", ts(skip))]
+    pub authored_geometry_nulls: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -6,6 +6,7 @@ pub mod container;
 mod de;
 pub mod ellipse;
 pub mod frame;
+mod geometry_nulls;
 mod glue;
 pub mod icon_font;
 pub mod image;
@@ -56,15 +57,13 @@ pub use text_area::TextAreaNode;
 pub use text_input::TextInputNode;
 pub use video::VideoMeta;
 
-use serde::Serialize;
-
 /// Union of all concrete node types.
 /// Tag is the JSON `"type"` field.
 // `Deserialize` (in `de.rs`) and `Clone`/`PartialEq` (in `glue.rs`) are
 // hand-written with the derives' exact semantics, so their bodies are
 // compiled once instead of once per crate. (Plain comment: doc comments
 // flow into the exported JSON schema.)
-#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[derive(Debug, schemars::JsonSchema)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(tag = "type", rename_all = "snake_case")]

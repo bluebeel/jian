@@ -214,6 +214,7 @@ fn decode_child(child: Buf) -> Result<Shallow, Error> {
 /// returned undecoded; any other `children` shape (or a repeated key) stays
 /// in place so the struct reports it exactly as the derive did.
 fn decode_parts(variant: usize, body: Buf) -> Result<Shallow, Error> {
+    let nulls = super::geometry_nulls::from_fields(&body);
     let (body, children) = match body {
         Buf::Map(mut fields) if matches!(variant, 0 | 1 | 2 | 19 | 20) => {
             let children = take_children(&mut fields);
@@ -221,7 +222,9 @@ fn decode_parts(variant: usize, body: Buf) -> Result<Shallow, Error> {
         }
         other => (other, None),
     };
-    Ok((decode_variant(variant, body)?, children))
+    let mut node = decode_variant(variant, body)?;
+    super::geometry_nulls::record(&mut node, nulls);
+    Ok((node, children))
 }
 
 fn take_children(fields: &mut Vec<(String, Buf)>) -> Option<Vec<Buf>> {
