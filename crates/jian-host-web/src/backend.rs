@@ -82,6 +82,7 @@ pub struct CanvasKitBackend {
 impl CanvasKitBackend {
     pub async fn load(canvas: HtmlCanvasElement, asset_base: &str) -> Result<Self, JsValue> {
         let runtime = canvaskit::load(asset_base).await?;
+        runtime.set_shadow_kernel_source(jian_core::render::shadow::TRIANGULAR_SHADOW_SHADER);
         if !runtime.register_font(
             "Roboto",
             "Roboto",
@@ -492,8 +493,20 @@ impl RenderBackend for CanvasKitBackend {
             },
             bounds,
         );
-        self.commands
-            .push(Command::Layer(bounds, self.pending_filter.take()));
+        let mut filter = self.pending_filter.take();
+        if let Some(Filter::Shadow(shadow)) = &filter {
+            if shadow.blur_kernel == jian_core::render::shadow::ShadowBlurKernel::Triangular {
+                if let Some(shape) = shadow.silhouette {
+                    self.commands.push(Command::Draw(DrawOp::ShadowedRect {
+                        rect: shape.bounds,
+                        radii: shape.radii,
+                        shadow: shadow.clone(),
+                    }));
+                    filter = None;
+                }
+            }
+        }
+        self.commands.push(Command::Layer(bounds, filter));
     }
     fn pop_layer(&mut self) {
         self.trace("backend.pop_layer");
@@ -642,15 +655,26 @@ fn gradient_values(stops: &[GradientStop]) -> Vec<f32> {
     values
 }
 fn shadow_values(shadow: &ShadowSpec) -> Vec<f32> {
+    let color = shadow.float_color.unwrap_or([
+        f32::from(shadow.color.r()) / 255.0,
+        f32::from(shadow.color.g()) / 255.0,
+        f32::from(shadow.color.b()) / 255.0,
+        f32::from(shadow.color.a()) / 255.0,
+    ]);
     vec![
         shadow.dx,
         shadow.dy,
         shadow.blur,
         shadow.spread,
-        f32::from(shadow.color.r()) / 255.0,
-        f32::from(shadow.color.g()) / 255.0,
-        f32::from(shadow.color.b()) / 255.0,
-        f32::from(shadow.color.a()) / 255.0,
+        color[0],
+        color[1],
+        color[2],
+        color[3],
+        if shadow.blur_kernel == jian_core::render::shadow::ShadowBlurKernel::Triangular {
+            1.0
+        } else {
+            0.0
+        },
     ]
 }
 fn path_values(commands: &[PathCommand]) -> Vec<f32> {
