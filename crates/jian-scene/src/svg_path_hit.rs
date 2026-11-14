@@ -10,6 +10,9 @@ use std::{
 
 const CACHE_BYTES: usize = 8 * 1024 * 1024;
 const CACHE_ENTRIES: usize = 256;
+const MAX_PENDING: usize = 16;
+const PENDING_KEY_BYTES: usize = 4 * 1024 * 1024;
+type Pending = Arc<OnceLock<Option<Arc<Geometry>>>>;
 
 struct Geometry {
     outline: BezPath,
@@ -22,56 +25,54 @@ struct Cache {
     entries: HashMap<Arc<str>, (Option<Arc<Geometry>>, usize)>,
     order: VecDeque<Arc<str>>,
     bytes: usize,
+    pending: HashMap<Arc<str>, Pending>,
+    pending_bytes: usize,
 }
 
 fn geometry(d: &str) -> Option<Arc<Geometry>> {
     static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
-    if let Some((value, _)) = cache
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .entries
-        .get(d)
-    {
-        return value.clone();
-    }
+    let pending = {
+        let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((value, _)) = cache.entries.get(d) {
+            return value.clone();
+        }
+        if let Some(value) = cache.pending.get(d) {
+            Some(value.clone())
+        } else if cache.pending.len() < MAX_PENDING
+            && d.len() <= PENDING_KEY_BYTES.saturating_sub(cache.pending_bytes)
+        {
+            let value = Arc::new(OnceLock::new());
+            cache.pending.insert(Arc::from(d), value.clone());
+            cache.pending_bytes += d.len();
+            Some(value)
+        } else {
+            None
+        }
+    };
     // Parse outside the cache lock: unrelated documents never wait on SVG
     // decoding. All hit arithmetic stays local and f64, even on distant pages.
-    let parsed = BezPath::from_svg(d).ok().filter(BezPath::is_finite);
-    let value = parsed.and_then(|outline| {
-        let bounds = outline.bounding_box();
-        if !bounds.is_finite() {
-            return None;
-        }
-        // SVG fills implicitly close every subpath; strokes retain authored
-        // closure. Keeping the two paths separate preserves open strokes.
-        let mut fill = BezPath::new();
-        let mut open = false;
-        for element in outline.iter() {
-            if matches!(element, PathEl::MoveTo(_)) && open {
-                fill.close_path();
-            }
-            open = !matches!(element, PathEl::ClosePath);
-            fill.push(element);
-        }
-        if open {
-            fill.close_path();
-        }
-        Some(Arc::new(Geometry {
-            outline,
-            fill,
-            bounds,
-        }))
-    });
+    let value = pending
+        .as_ref()
+        .map_or_else(|| parse(d), |slot| slot.get_or_init(|| parse(d)).clone());
     let charge = d.len().saturating_add(value.as_ref().map_or(0, |g| {
         (g.outline.elements().len() + g.fill.elements().len())
             .saturating_mul(size_of::<PathEl>())
             .saturating_mul(2)
     }));
+    let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
+    if pending.as_ref().is_some_and(|slot| {
+        cache
+            .pending
+            .get(d)
+            .is_some_and(|live| Arc::ptr_eq(slot, live))
+    }) {
+        cache.pending.remove(d);
+        cache.pending_bytes = cache.pending_bytes.saturating_sub(d.len());
+    }
     if charge > CACHE_BYTES {
         return value;
     }
-    let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
     if let Some((existing, _)) = cache.entries.get(d) {
         return existing.clone();
     }
@@ -88,6 +89,32 @@ fn geometry(d: &str) -> Option<Arc<Geometry>> {
     cache.entries.insert(key, (value.clone(), charge));
     cache.bytes += charge;
     value
+}
+
+fn parse(d: &str) -> Option<Arc<Geometry>> {
+    let outline = BezPath::from_svg(d).ok().filter(BezPath::is_finite)?;
+    let bounds = outline.bounding_box();
+    if !bounds.is_finite() {
+        return None;
+    }
+    // SVG fills implicitly close every subpath; strokes retain authored closure.
+    let mut fill = BezPath::new();
+    let mut open = false;
+    for element in outline.iter() {
+        if matches!(element, PathEl::MoveTo(_)) && open {
+            fill.close_path();
+        }
+        open = !matches!(element, PathEl::ClosePath);
+        fill.push(element);
+    }
+    if open {
+        fill.close_path();
+    }
+    Some(Arc::new(Geometry {
+        outline,
+        fill,
+        bounds,
+    }))
 }
 
 pub(super) fn contains(node: &SceneNode, point: Point2D, zoom: f32) -> bool {
