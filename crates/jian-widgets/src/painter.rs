@@ -27,6 +27,13 @@ pub trait Painter {
     }
     fn clip_rect(&mut self, rect: Rect);
 
+    /// Optionally push a shadow-only exclusion; the caller promises a later
+    /// opaque Normal fill and restores once after its outer shadows. True
+    /// means one saved clip was pushed; false leaves all state unchanged.
+    fn push_opaque_shadow_exclusion(&mut self, _rect: Rect, _max_radius: f32) -> bool {
+        false
+    }
+
     fn clip_round_rect(&mut self, rect: Rect, radius: f32) {
         let _ = radius;
         self.clip_rect(rect);

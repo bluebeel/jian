@@ -8,6 +8,65 @@ pub fn quantize_advance(value: f32, font_size: f32) -> f32 {
     (value * 1024.0 / font_size).round() * font_size / 1024.0
 }
 
+/// Add authored tracking after the complete coordinate is assembled. The
+/// integer cluster ordinal and the original f32 spacing are exact f64 inputs;
+/// only the final local coordinate is narrowed to the paint representation.
+pub fn tracked_position(position: f32, ordinal: usize, spacing: f32) -> f32 {
+    (f64::from(position) + ordinal as f64 * f64::from(spacing)) as f32
+}
+
+const MAX_GRID_TICKS: i64 = (1_i64 << 52) - 1;
+fn grid_ticks(value: f32, size: f32) -> Option<i64> {
+    if !value.is_finite() || !size.is_finite() || size <= 0.0 {
+        return None;
+    }
+    // Preserve the existing f32 quantization and Rust tie rule. Accumulate its
+    // integer result, rather than repeatedly canceling raw shaped positions.
+    let ticks = (value * 1024.0 / size).round();
+    (ticks.is_finite() && f64::from(ticks).abs() <= MAX_GRID_TICKS as f64).then_some(ticks as i64)
+}
+fn grid_position(ticks: i64, size: f32, origin: f32) -> Option<f32> {
+    let position = (f64::from(origin) + ticks as f64 * f64::from(size) / 1024.0) as f32;
+    position.is_finite().then_some(position)
+}
+fn append_ticks(total: &mut i64, ticks: i64) -> Option<()> {
+    *total = total.checked_add(ticks)?;
+    (total.unsigned_abs() <= MAX_GRID_TICKS as u64).then_some(())
+}
+
+pub struct PositionedAdvances {
+    pub positions: Vec<Point>,
+    pub advance: f32,
+}
+/// Position a modern unshaped run without accumulating a separate rounding
+/// error for every authored tracking step. Its final advance includes the
+/// last spacing step so a following fallback-face segment starts correctly.
+pub fn position_nominal_advances(
+    widths: &[f32],
+    size: f32,
+    spacing: f32,
+    factor: f32,
+) -> Option<PositionedAdvances> {
+    if !spacing.is_finite() || !factor.is_finite() {
+        return None;
+    }
+    let mut positions = Vec::with_capacity(widths.len());
+    let mut ticks = 0;
+    for (index, width) in widths.iter().enumerate() {
+        let base = grid_position(ticks, size, 0.0)?;
+        let x = tracked_position(base, index, spacing);
+        if !x.is_finite() {
+            return None;
+        }
+        positions.push(Point::new(x, 0.0));
+        append_ticks(&mut ticks, grid_ticks(*width * factor, size)?)?;
+    }
+    let advance = tracked_position(grid_position(ticks, size, 0.0)?, widths.len(), spacing);
+    advance
+        .is_finite()
+        .then_some(PositionedAdvances { positions, advance })
+}
+
 /// Unhinted nominal advances, using instantiated integer TrueType metrics.
 /// Variable font backends can expose fractional design-unit advances even
 /// though the document's scalable font metrics use OpenType integer rounding.
@@ -105,10 +164,14 @@ pub fn adjust_glyph_run(
     let mut widths = vec![0.0; glyphs.len()];
     nominal_font.get_widths(glyphs, &mut widths);
     let integer_widths = integer_nominal_advances(&nominal_font, glyphs);
-    let mut correction = 0.0;
+    let mut ticks = 0;
+    let initial = positions[0].x;
     let mut adjusted = Vec::with_capacity(glyphs.len());
     for (index, position) in positions.iter().enumerate() {
-        adjusted.push(Point::new(position.x + correction, position.y));
+        adjusted.push(Point::new(
+            grid_position(ticks, font.size(), initial)?,
+            position.y,
+        ));
         let end = positions.get(index + 1).map_or(advance_x, |p| p.x);
         let shaped = end - position.x;
         let nominal = widths[index];
@@ -119,11 +182,12 @@ pub fn adjust_glyph_run(
         let grid_nominal = integer_widths
             .as_ref()
             .map_or(nominal, |widths| widths[index]);
-        correction += quantize_advance(grid_nominal, font.size())
-            + quantize_advance(contextual, font.size())
-            - shaped;
+        append_ticks(&mut ticks, grid_ticks(grid_nominal, font.size())?)?;
+        append_ticks(&mut ticks, grid_ticks(contextual, font.size())?)?;
     }
-    Some(AdjustedGlyphRun {
+    let correction = ((f64::from(initial) + ticks as f64 * f64::from(font.size()) / 1024.0)
+        - f64::from(advance_x)) as f32;
+    correction.is_finite().then_some(AdjustedGlyphRun {
         positions: adjusted,
         advance_correction: correction,
     })
