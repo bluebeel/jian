@@ -67,6 +67,32 @@ pub fn position_nominal_advances(
         .then_some(PositionedAdvances { positions, advance })
 }
 
+/// Measure the same checked integer nominal prefix used for positioned glyphs,
+/// without allocating their positions. Face segments include a final spacing
+/// step; the final segment excludes it from the visible run advance.
+pub fn measure_nominal_advances(
+    widths: &[f32],
+    size: f32,
+    spacing: f32,
+    factor: f32,
+    include_trailing_spacing: bool,
+) -> Option<f32> {
+    if !spacing.is_finite() || !factor.is_finite() {
+        return None;
+    }
+    let mut ticks = 0;
+    for width in widths {
+        append_ticks(&mut ticks, grid_ticks(*width * factor, size)?)?;
+    }
+    let steps = if include_trailing_spacing {
+        widths.len()
+    } else {
+        widths.len().saturating_sub(1)
+    };
+    let advance = tracked_position(grid_position(ticks, size, 0.0)?, steps, spacing);
+    advance.is_finite().then_some(advance)
+}
+
 /// Unhinted nominal advances, using instantiated integer TrueType metrics.
 /// Variable font backends can expose fractional design-unit advances even
 /// though the document's scalable font metrics use OpenType integer rounding.
