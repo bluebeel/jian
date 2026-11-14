@@ -350,6 +350,29 @@ pub fn node_to_style(n: &jian_ops_schema::node::PenNode) -> Style {
     style
 }
 
+/// Explicit authored layout edits opt flow children into flex positioning.
+/// Figma Preserve keeps x/y for every child, but records constraints only for
+/// intentional ABSOLUTE children. Retain that distinction without erasing
+/// canonical coordinates or changing unedited imported containers.
+pub(super) fn child_joins_computed_flow(
+    parent: &jian_ops_schema::node::PenNode,
+    child: &jian_ops_schema::node::PenNode,
+) -> bool {
+    use jian_ops_schema::node::{container::LayoutMode, PenNode};
+    let container = match parent {
+        PenNode::Frame(n) => &n.container,
+        PenNode::Group(n) => &n.container,
+        PenNode::Rectangle(n) => &n.container,
+        _ => return false,
+    };
+    container.preserve_geometry == Some(false)
+        && matches!(
+            container.layout.as_ref(),
+            Some(LayoutMode::Horizontal | LayoutMode::Vertical)
+        )
+        && node_base(child).is_some_and(|base| base.constraints.is_none())
+}
+
 /// Responsive style conversion: legacy conversion plus sanitized min/max bounds.
 pub(crate) fn node_to_style_responsive(
     node: &jian_ops_schema::node::PenNode,

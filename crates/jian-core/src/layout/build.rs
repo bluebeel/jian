@@ -75,6 +75,14 @@ impl LayoutEngine {
             // wrap and sibling cards stay equal-height (otherwise an overflowing
             // row squeezes the cards into ragged, uneven heights).
             if let Some(p) = data.parent {
+                let parent_schema = doc_tree.node(p).expect("layout parent key").schema;
+                if resolve::child_joins_computed_flow(parent_schema, data.schema) {
+                    style.position = Position::Relative;
+                    style.inset.left = LengthPercentageAuto::Auto;
+                    style.inset.right = LengthPercentageAuto::Auto;
+                    style.inset.top = LengthPercentageAuto::Auto;
+                    style.inset.bottom = LengthPercentageAuto::Auto;
+                }
                 if resolve::node_is_stack_container(
                     doc_tree.node(p).expect("layout parent key").schema,
                 ) {

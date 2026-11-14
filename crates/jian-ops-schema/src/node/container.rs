@@ -112,6 +112,13 @@ pub struct ContainerProps {
     pub limits: crate::sizing::SizeLimits,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<LayoutMode>,
+    /// False opts this container into computed child flow even when child
+    /// coordinates were saved. In Preserve documents only this local layout
+    /// changes; nested unedited frames keep their authored internal geometry.
+    /// Constrained children remain absolute. None/true inherits the document's
+    /// existing geometry behavior. Stored coordinates are never erased.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preserve_geometry: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gap: Option<crate::node::base::NumberOrExpression>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
