@@ -1,163 +1,219 @@
-//! Image decode + cache.
-//!
-//! `DrawOp::Image` carries an `ImageSource`. The skia backend caches
-//! decoded `sk_Image` instances keyed by [`ImageSource::cache_key`] —
-//! re-drawing the same image (a list cell repainting on scroll, the
-//! same `image` URL reused across frames) skips the decode.
-//!
-//! Decoding paths:
-//! - **`DataUrl`** — strip `data:image/...;base64,` prefix, base64-decode
-//!   the payload, hand the bytes to `skia_safe::Image::from_encoded`.
-//! - **`Bytes`** — feed straight into `from_encoded`.
-//! - **`Url`** — host-resolution path; without an injected resolver
-//!   we return `None` and the backend draws a placeholder.
-//!
-//! Bounded LRU + soft byte cap. The cache evicts the least-recently
-//! used entry once `decoded_byte_total > BYTE_CAP`. The cap defaults
-//! to 128 MB (matching the Plan 7 / Plan 12 budget); hosts with
-//! tighter memory targets construct a custom-sized cache via
-//! `ImageCache::with_byte_cap`.
-//!
-//! Decoding failures are cached too (as `None`) so the same broken
-//! data: URL doesn't burn CPU on every redraw — but `None` entries
-//! count as zero bytes for the eviction calculation.
-
+//! Exact bounded image reuse. Immutable Arc source owners supply the hot-byte
+//! lookup proof; digests only accelerate complete content equality on misses.
+//! Oversized valid images draw through a one-call slot instead of disappearing.
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 use jian_core::render::ImageSource;
 use skia_safe::Image as SkImage;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
 
-/// Default soft byte cap — 128 MB. Plan 7 §C.1 budget.
 pub(crate) const DEFAULT_BYTE_CAP: usize = 128 * 1024 * 1024;
-
+const MAX_ENTRIES: usize = 1024;
+const MAX_SOURCE_BYTES: usize = 16 * 1024 * 1024;
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct Key {
+    kind: u8,
+    hash: u64,
+    len: usize,
+}
 struct CacheEntry {
+    source: ImageSource,
     image: Option<SkImage>,
-    /// Decoded RGBA byte estimate (0 on decode failure). Used by the
-    /// eviction loop; doesn't have to be exact, just monotonic.
     bytes: usize,
-    /// Monotonically increasing access timestamp — incremented on
-    /// each `get_or_decode` hit to drive LRU.
+    source_bytes: usize,
     last_used: u64,
 }
-
 pub(crate) struct ImageCache {
-    decoded: HashMap<String, CacheEntry>,
+    decoded: HashMap<Key, CacheEntry>,
+    // Only the exact retained strong owner's address is indexed. Removing a
+    // source removes this entry before its allocation can be recycled.
+    pointers: HashMap<usize, Key>,
     byte_total: usize,
+    source_total: usize,
     byte_cap: usize,
     tick: u64,
+    transient: Option<SkImage>,
 }
-
 impl Default for ImageCache {
     fn default() -> Self {
         Self::with_byte_cap(DEFAULT_BYTE_CAP)
     }
 }
-
 impl ImageCache {
     pub fn new() -> Self {
         Self::default()
     }
-
-    /// Construct with a custom soft byte cap. Capacity is interpreted
-    /// as decoded RGBA bytes; backing native objects (skia raster
-    /// surfaces, mipmaps) typically add 10-20% on top.
     pub fn with_byte_cap(cap: usize) -> Self {
         Self {
             decoded: HashMap::new(),
+            pointers: HashMap::new(),
             byte_total: 0,
+            source_total: 0,
             byte_cap: cap,
             tick: 0,
+            transient: None,
         }
     }
-
-    /// Look up the source's cached image, decoding on first miss.
-    /// Returns `None` if decoding failed or the source is a remote URL
-    /// the cache cannot resolve — callers fall back to a placeholder.
     pub fn get_or_decode(&mut self, source: &ImageSource) -> Option<&SkImage> {
-        let key = source.cache_key();
-        if !self.decoded.contains_key(&key) {
-            let decoded = decode(source);
-            let bytes = estimate_bytes(&decoded);
-            self.byte_total = self.byte_total.saturating_add(bytes);
-            let tick = self.next_tick();
-            self.decoded.insert(
-                key.clone(),
-                CacheEntry {
-                    image: decoded,
-                    bytes,
-                    last_used: tick,
-                },
-            );
-            self.evict_if_over_budget(&key);
-        }
+        self.transient = None;
+        let key = self.key(source);
         let tick = self.next_tick();
-        let entry = self.decoded.get_mut(&key)?;
-        entry.last_used = tick;
-        entry.image.as_ref()
+        if self
+            .decoded
+            .get(&key)
+            .is_some_and(|entry| same_source(&entry.source, source))
+        {
+            let entry = self.decoded.get_mut(&key)?;
+            entry.last_used = tick;
+            // Arc identity avoids byte work on the common repeated owner. A
+            // content-equal new owner replaces just this tiny ownership proof.
+            if let (ImageSource::Bytes(old), ImageSource::Bytes(new)) = (&mut entry.source, source)
+            {
+                if !Arc::ptr_eq(old, new) {
+                    self.pointers.remove(&(Arc::as_ptr(old) as usize));
+                    self.source_total = self.source_total.saturating_sub(entry.source_bytes);
+                    *old = Arc::clone(new);
+                    entry.source_bytes = source_storage(source);
+                    self.source_total = self.source_total.saturating_add(entry.source_bytes);
+                    self.pointers.insert(Arc::as_ptr(new) as usize, key);
+                }
+            }
+            // Larger capacity on an equivalent input does not need retention;
+            // preserve the cache bounds while returning its immutable pixels.
+            if self.source_total > MAX_SOURCE_BYTES {
+                self.transient = self.remove(key).and_then(|entry| entry.image);
+                return self.transient.as_ref();
+            }
+            return self.decoded.get(&key)?.image.as_ref();
+        }
+        // Digest collisions never authorize a different source or failure.
+        self.remove(key);
+        let image = decode(source);
+        let bytes = estimate_bytes(&image);
+        let source_bytes = source_storage(source);
+        if bytes > self.byte_cap || source_bytes > MAX_SOURCE_BYTES {
+            self.transient = image;
+            return self.transient.as_ref();
+        }
+        self.byte_total = self.byte_total.saturating_add(bytes);
+        self.source_total = self.source_total.saturating_add(source_bytes);
+        self.decoded.insert(
+            key,
+            CacheEntry {
+                source: source.clone(),
+                image,
+                bytes,
+                source_bytes,
+                last_used: tick,
+            },
+        );
+        if let ImageSource::Bytes(owner) = source {
+            self.pointers.insert(Arc::as_ptr(owner) as usize, key);
+        }
+        self.evict_if_over_budget(key);
+        self.decoded.get(&key)?.image.as_ref()
     }
-
-    /// Number of cached entries (decoded *and* failed). Test surface.
+    fn key(&self, source: &ImageSource) -> Key {
+        if let ImageSource::Bytes(owner) = source {
+            if let Some(key) = self.pointers.get(&(Arc::as_ptr(owner) as usize)) {
+                if self.decoded.get(key).is_some_and(|entry|matches!(&entry.source,ImageSource::Bytes(retained) if Arc::ptr_eq(retained,owner))) {
+                    return *key;
+                }
+            }
+        }
+        let (kind, bytes) = match source {
+            ImageSource::DataUrl(s) => (0, s.as_bytes()),
+            ImageSource::Bytes(s) => (1, s.as_slice()),
+            ImageSource::Url(s) => (2, s.as_bytes()),
+        };
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut hash);
+        Key {
+            kind,
+            hash: hash.finish(),
+            len: bytes.len(),
+        }
+    }
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.decoded.len()
     }
-
-    /// Total cached bytes — `0` for entries whose decode failed.
     #[cfg(test)]
     pub fn byte_total(&self) -> usize {
         self.byte_total
     }
-
     fn next_tick(&mut self) -> u64 {
-        self.tick = self.tick.wrapping_add(1);
+        if self.tick == u64::MAX {
+            // Preserve relative recency rather than letting wraparound turn a
+            // new use into the oldest retained image.
+            let mut order: Vec<_> = self
+                .decoded
+                .iter()
+                .map(|(key, e)| (*key, e.last_used))
+                .collect();
+            order.sort_by_key(|(_, tick)| *tick);
+            for (rank, (key, _)) in order.into_iter().enumerate() {
+                self.decoded.get_mut(&key).unwrap().last_used = rank as u64;
+            }
+            self.tick = self.decoded.len() as u64;
+        }
+        self.tick += 1;
         self.tick
     }
-
-    /// Drop least-recently-used entries until `byte_total <= byte_cap`.
-    /// `protect` is the just-inserted key — protected from same-call
-    /// eviction *unless* it alone exceeds the cap, in which case
-    /// caching it indefinitely would silently bypass the budget.
-    /// Oversize protected entries are dropped immediately.
-    fn evict_if_over_budget(&mut self, protect: &str) {
-        // Drop other LRU victims first.
-        loop {
-            if self.byte_total <= self.byte_cap {
-                return;
-            }
+    fn remove(&mut self, key: Key) -> Option<CacheEntry> {
+        let entry = self.decoded.remove(&key)?;
+        self.byte_total = self.byte_total.saturating_sub(entry.bytes);
+        self.source_total = self.source_total.saturating_sub(entry.source_bytes);
+        if let ImageSource::Bytes(owner) = &entry.source {
+            self.pointers.remove(&(Arc::as_ptr(owner) as usize));
+        }
+        Some(entry)
+    }
+    fn evict_if_over_budget(&mut self, protect: Key) {
+        while self.byte_total > self.byte_cap
+            || self.source_total > MAX_SOURCE_BYTES
+            || self.decoded.len() > MAX_ENTRIES
+        {
             let victim = self
                 .decoded
                 .iter()
-                .filter(|(k, _)| *k != protect)
-                .min_by_key(|(_, e)| e.last_used)
-                .map(|(k, _)| k.clone());
-            let Some(key) = victim else {
+                .filter(|(key, _)| **key != protect)
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(key, _)| *key);
+            let Some(victim) = victim else {
                 break;
             };
-            if let Some(removed) = self.decoded.remove(&key) {
-                self.byte_total = self.byte_total.saturating_sub(removed.bytes);
-            }
-        }
-        // If we're still over budget, the protected entry itself is
-        // larger than the cap — refusing to evict means it lives
-        // forever over budget. Drop it; callers fall back to the
-        // grey placeholder which is cheaper than caching a
-        // budget-busting image.
-        if self.byte_total > self.byte_cap {
-            if let Some(removed) = self.decoded.remove(protect) {
-                self.byte_total = self.byte_total.saturating_sub(removed.bytes);
-            }
+            self.remove(victim);
         }
     }
 }
-
-/// Conservative RGBA-byte estimate. `width * height * 4` matches the
-/// uncompressed cost of decoded image data in Skia.
+fn same_source(a: &ImageSource, b: &ImageSource) -> bool {
+    match (a, b) {
+        (ImageSource::Bytes(a), ImageSource::Bytes(b)) => {
+            Arc::ptr_eq(a, b) || a.as_slice() == b.as_slice()
+        }
+        (ImageSource::DataUrl(a), ImageSource::DataUrl(b))
+        | (ImageSource::Url(a), ImageSource::Url(b)) => a == b,
+        _ => false,
+    }
+}
+fn source_storage(source: &ImageSource) -> usize {
+    let overhead = std::mem::size_of::<CacheEntry>() + 128;
+    overhead.saturating_add(match source {
+        // Charge the retained original plus the native decoder's encoded copy.
+        ImageSource::Bytes(b) => b.capacity().saturating_add(b.len()).saturating_add(32),
+        ImageSource::DataUrl(s) => s.capacity().saturating_add(s.len()),
+        ImageSource::Url(s) => s.capacity(),
+    })
+}
 fn estimate_bytes(image: &Option<SkImage>) -> usize {
     image
         .as_ref()
-        .map(|img| (img.width() as usize) * (img.height() as usize) * 4)
-        .unwrap_or(0)
+        .map_or(0, |image| image.image_info().compute_min_byte_size())
 }
 
 fn decode(source: &ImageSource) -> Option<SkImage> {
