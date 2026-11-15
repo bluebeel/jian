@@ -77,7 +77,7 @@ fn gradient_paint(
     Some(paint)
 }
 
-fn draw_gradient_rect(
+pub(super) fn draw_gradient_rect(
     canvas: &skia_safe::Canvas,
     rect: Rect,
     radii: BorderRadii,

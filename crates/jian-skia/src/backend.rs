@@ -366,7 +366,7 @@ fn draw_canvas(
 }
 
 fn draw_icon(canvas: &skia_safe::Canvas, r: Rect, name: &str, color: jian_core::scene::Color) {
-    use skia_safe::{utils::parse_path, Matrix};
+    use skia_safe::Matrix;
     let Some(d) = crate::icons::lookup(name) else {
         // Unknown glyph — fall back to a small filled square so the
         // missing icon is visible for debugging.
@@ -376,7 +376,7 @@ fn draw_icon(canvas: &skia_safe::Canvas, r: Rect, name: &str, color: jian_core::
         canvas.draw_rect(to_sk_rect(r), &p);
         return;
     };
-    let Some(path) = parse_path::from_svg(d) else {
+    let Some(path) = icon_path(d) else {
         return;
     };
     // Lucide icons are authored in a 24×24 viewBox. Scale + translate
@@ -400,6 +400,36 @@ fn draw_icon(canvas: &skia_safe::Canvas, r: Rect, name: &str, color: jian_core::
     sp.set_stroke_cap(skia_safe::paint::Cap::Round);
     sp.set_stroke_join(skia_safe::paint::Join::Round);
     canvas.draw_path(&path, &sp);
+}
+
+// This source is an actual bundled static path returned by icons::lookup;
+// cache entries cannot outlive/recycle that immutable lifetime.
+fn icon_path(source: &'static str) -> Option<skia_safe::Path> {
+    use std::{cell::RefCell, collections::HashMap};
+    thread_local! {
+        static ICONS: RefCell<(usize, HashMap<&'static str, skia_safe::Path>)> =
+            RefCell::new((0, HashMap::new()));
+    }
+    if let Some(path) = ICONS.with(|slot| slot.borrow().1.get(source).cloned()) {
+        return Some(path);
+    }
+    let path = skia_safe::utils::parse_path::from_svg(source)?;
+    let bytes = source
+        .len()
+        .saturating_add(path.approximate_bytes_used())
+        .saturating_add(256);
+    if bytes <= 1024 * 1024 {
+        ICONS.with(|slot| {
+            let mut cache = slot.borrow_mut();
+            if cache.1.len() >= 128 || cache.0 > 1024 * 1024 - bytes {
+                cache.0 = 0;
+                cache.1.clear();
+            }
+            cache.0 += bytes;
+            cache.1.insert(source, path.clone());
+        });
+    }
+    Some(path)
 }
 
 fn draw_image(
@@ -470,15 +500,7 @@ fn draw_shader_rect(
     spec: &jian_core::render::ShaderSpec,
     stroke: Option<&jian_core::render::StrokeOp>,
 ) {
-    let is_rounded = radii != BorderRadii::zero();
-    let radii_arr = [
-        SkPoint::new(radii.tl, radii.tl),
-        SkPoint::new(radii.tr, radii.tr),
-        SkPoint::new(radii.br, radii.br),
-        SkPoint::new(radii.bl, radii.bl),
-    ];
-
-    let shader = build_shader(shader_cache, spec);
+    let shader = build_shader(shader_cache, spec, rect);
     let mut paint = SkPaint::default();
     crate::raster_sampling::configure_geometry(&mut paint);
     paint.set_style(PaintStyle::Fill);
@@ -490,29 +512,12 @@ fn draw_shader_rect(
         None => {
             // Compile failed (or no shader produced) — visible solid
             // fallback so the node still paints.
-            let c = to_sk_color(spec.fallback);
+            let mut c = to_sk_color(spec.fallback);
+            c.a = combined_alpha(spec.fallback, spec.opacity);
             paint.set_color4f(c, None);
         }
     }
-    if is_rounded {
-        let rrect = RRect::new_rect_radii(to_sk_rect(rect), &radii_arr);
-        canvas.draw_rrect(rrect, &paint);
-    } else {
-        canvas.draw_rect(to_sk_rect(rect), &paint);
-    }
-
-    if let Some(stroke) = stroke {
-        let mut p = SkPaint::new(to_sk_color(stroke.color), None);
-        p.set_style(PaintStyle::Stroke);
-        p.set_stroke_width(stroke.width);
-        crate::raster_sampling::configure_geometry(&mut p);
-        if is_rounded {
-            let rrect = RRect::new_rect_radii(to_sk_rect(rect), &radii_arr);
-            canvas.draw_rrect(rrect, &p);
-        } else {
-            canvas.draw_rect(to_sk_rect(rect), &p);
-        }
-    }
+    gradients::draw_gradient_rect(canvas, rect, radii, Some(&paint), stroke);
 }
 
 /// Compile + bind a shader spec into a `skia_safe::Shader`, or `None` on
@@ -522,6 +527,7 @@ fn draw_shader_rect(
 fn build_shader(
     shader_cache: &mut ShaderCache,
     spec: &jian_core::render::ShaderSpec,
+    rect: Rect,
 ) -> Option<skia_safe::Shader> {
     use skia_safe::runtime_effect::RuntimeShaderBuilder;
     // `RuntimeEffect` is an RCHandle — this clone is a refcount bump, not
@@ -533,7 +539,18 @@ fn build_shader(
         // uniform doesn't sink the whole fill.
         let _ = builder.set_uniform_float(&u.name, &u.values);
     }
-    builder.make_shader(&skia_safe::Matrix::default())
+    let local = crate::shader_geometry::local_matrix(
+        [
+            rect.min_x(),
+            rect.min_y(),
+            rect.size.width,
+            rect.size.height,
+        ],
+        spec.uniforms
+            .iter()
+            .map(|uniform| (uniform.name.as_str(), uniform.values.as_slice())),
+    );
+    builder.make_shader(&local)
 }
 
 fn draw_rect(canvas: &skia_safe::Canvas, r: Rect, paint: &Paint) {

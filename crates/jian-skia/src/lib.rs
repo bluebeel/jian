@@ -55,6 +55,7 @@ pub mod mesh_geometry;
 pub mod path;
 pub mod raster_sampling;
 pub mod shader_cache;
+pub mod shader_geometry;
 pub mod startup;
 pub mod surface;
 #[cfg(feature = "textlayout")]
