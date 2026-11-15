@@ -23,6 +23,9 @@ pub(super) fn gradient_endpoints(rect: Rect, angle_deg: f32) -> ((f32, f32), (f3
     ((x0, y0), (x1, y1))
 }
 
+#[path = "gradient_reuse.rs"]
+mod reuse;
+
 pub(super) fn draw_linear_gradient_rect(
     canvas: &skia_safe::Canvas,
     rect: Rect,
@@ -30,62 +33,10 @@ pub(super) fn draw_linear_gradient_rect(
     g: &jian_core::render::LinearGradient,
     stroke: Option<&jian_core::render::StrokeOp>,
 ) {
-    use skia_safe::{gradient, Shader, TileMode};
     let (p0, p1) = gradient_endpoints(rect, g.angle_deg);
-    let colors: Vec<Color4f> = g.stops.iter().map(|s| to_sk_color(s.color)).collect();
-    let offsets: Vec<f32> = g.stops.iter().map(|s| s.offset.clamp(0.0, 1.0)).collect();
-    // skia-safe 0.97 replaced `gradient_shader::linear` with `gradient::shaders::linear_gradient`
-    // taking a `gradient::Gradient { colors, interpolation }` description.
-    let gradient_colors =
-        gradient::Colors::new(&colors, Some(offsets.as_slice()), TileMode::Clamp, None);
-    let gradient_obj = gradient::Gradient::new(gradient_colors, gradient::Interpolation::default());
-    let shader: Option<Shader> = gradient::shaders::linear_gradient(
-        (SkPoint::new(p0.0, p0.1), SkPoint::new(p1.0, p1.1)),
-        &gradient_obj,
-        None,
-    );
-    let mut paint = SkPaint::default();
-    crate::raster_sampling::configure_geometry(&mut paint);
-    paint.set_style(PaintStyle::Fill);
-    paint.set_alpha_f(g.opacity);
-    if let Some(s) = shader {
-        paint.set_shader(s as Shader);
-    }
-
-    let is_rounded = radii != BorderRadii::zero();
-    if is_rounded {
-        let sk_rect = to_sk_rect(rect);
-        let radii_arr = [
-            SkPoint::new(radii.tl, radii.tl),
-            SkPoint::new(radii.tr, radii.tr),
-            SkPoint::new(radii.br, radii.br),
-            SkPoint::new(radii.bl, radii.bl),
-        ];
-        let rrect = RRect::new_rect_radii(sk_rect, &radii_arr);
-        canvas.draw_rrect(rrect, &paint);
-    } else {
-        canvas.draw_rect(to_sk_rect(rect), &paint);
-    }
-
-    if let Some(stroke) = stroke {
-        let mut p = SkPaint::new(to_sk_color(stroke.color), None);
-        p.set_style(PaintStyle::Stroke);
-        p.set_stroke_width(stroke.width);
-        crate::raster_sampling::configure_geometry(&mut p);
-        if is_rounded {
-            let sk_rect = to_sk_rect(rect);
-            let radii_arr = [
-                SkPoint::new(radii.tl, radii.tl),
-                SkPoint::new(radii.tr, radii.tr),
-                SkPoint::new(radii.br, radii.br),
-                SkPoint::new(radii.bl, radii.bl),
-            ];
-            let rrect = RRect::new_rect_radii(sk_rect, &radii_arr);
-            canvas.draw_rrect(rrect, &p);
-        } else {
-            canvas.draw_rect(to_sk_rect(rect), &p);
-        }
-    }
+    let shader = reuse::shader(false, [p0.0, p0.1, p1.0, p1.1], &g.stops);
+    let paint = gradient_paint(shader, &g.stops, g.opacity);
+    draw_gradient_rect(canvas, rect, radii, paint.as_ref(), stroke);
 }
 
 pub(super) fn draw_radial_gradient_rect(
@@ -95,63 +46,73 @@ pub(super) fn draw_radial_gradient_rect(
     g: &jian_core::render::RadialGradient,
     stroke: Option<&jian_core::render::StrokeOp>,
 ) {
-    use skia_safe::{gradient, Shader, TileMode};
-
-    // cx/cy ∈ [0,1] within the rect; radius ∈ [0,1] of max(w, h).
+    // Retain the original local-coordinate arithmetic and radius policy.
     let cx = rect.min_x() + g.cx * rect.size.width;
     let cy = rect.min_y() + g.cy * rect.size.height;
     let r = g.radius * rect.size.width.max(rect.size.height);
+    let shader = reuse::shader(true, [cx, cy, r.max(0.0), 0.0], &g.stops);
+    let paint = gradient_paint(shader, &g.stops, g.opacity);
+    draw_gradient_rect(canvas, rect, radii, paint.as_ref(), stroke);
+}
 
-    let colors: Vec<Color4f> = g.stops.iter().map(|s| to_sk_color(s.color)).collect();
-    let offsets: Vec<f32> = g.stops.iter().map(|s| s.offset.clamp(0.0, 1.0)).collect();
-    // skia-safe 0.97 replaced `gradient_shader::radial` with `gradient::shaders::radial_gradient`
-    // taking `(center, radius)` and a `gradient::Gradient` description.
-    let gradient_colors =
-        gradient::Colors::new(&colors, Some(offsets.as_slice()), TileMode::Clamp, None);
-    let gradient_obj = gradient::Gradient::new(gradient_colors, gradient::Interpolation::default());
-    let shader: Option<Shader> =
-        gradient::shaders::radial_gradient((SkPoint::new(cx, cy), r.max(0.0)), &gradient_obj, None);
+fn gradient_paint(
+    shader: Option<skia_safe::Shader>,
+    stops: &[jian_core::render::GradientStop],
+    opacity: f32,
+) -> Option<SkPaint> {
+    let first = stops.first()?;
     let mut paint = SkPaint::default();
     crate::raster_sampling::configure_geometry(&mut paint);
     paint.set_style(PaintStyle::Fill);
-    paint.set_alpha_f(g.opacity);
-    if let Some(s) = shader {
-        paint.set_shader(s as Shader);
-    }
-
-    let is_rounded = radii != BorderRadii::zero();
-    if is_rounded {
-        let sk_rect = to_sk_rect(rect);
-        let radii_arr = [
-            SkPoint::new(radii.tl, radii.tl),
-            SkPoint::new(radii.tr, radii.tr),
-            SkPoint::new(radii.br, radii.br),
-            SkPoint::new(radii.bl, radii.bl),
-        ];
-        let rrect = RRect::new_rect_radii(sk_rect, &radii_arr);
-        canvas.draw_rrect(rrect, &paint);
+    if let Some(shader) = shader {
+        paint.set_shader(shader);
+        paint.set_alpha_f(opacity);
     } else {
-        canvas.draw_rect(to_sk_rect(rect), &paint);
+        // A refused/single-stop gradient uses its authored color, not the
+        // default black Paint. Empty fills stay empty; strokes still draw.
+        let mut color = to_sk_color(first.color);
+        color.a *= opacity;
+        paint.set_color4f(color, None);
     }
+    Some(paint)
+}
 
-    if let Some(stroke) = stroke {
-        let mut p = SkPaint::new(to_sk_color(stroke.color), None);
-        p.set_style(PaintStyle::Stroke);
-        p.set_stroke_width(stroke.width);
-        crate::raster_sampling::configure_geometry(&mut p);
-        if is_rounded {
-            let sk_rect = to_sk_rect(rect);
-            let radii_arr = [
+fn draw_gradient_rect(
+    canvas: &skia_safe::Canvas,
+    rect: Rect,
+    radii: BorderRadii,
+    fill: Option<&SkPaint>,
+    stroke: Option<&jian_core::render::StrokeOp>,
+) {
+    // Reuse the exact same shape preparation for fill and stroke.
+    let bounds = to_sk_rect(rect);
+    let rounded = (radii != BorderRadii::zero()).then(|| {
+        RRect::new_rect_radii(
+            bounds,
+            &[
                 SkPoint::new(radii.tl, radii.tl),
                 SkPoint::new(radii.tr, radii.tr),
                 SkPoint::new(radii.br, radii.br),
                 SkPoint::new(radii.bl, radii.bl),
-            ];
-            let rrect = RRect::new_rect_radii(sk_rect, &radii_arr);
-            canvas.draw_rrect(rrect, &p);
+            ],
+        )
+    });
+    let draw = |paint: &SkPaint| {
+        if let Some(rrect) = rounded.as_ref() {
+            canvas.draw_rrect(rrect, paint);
         } else {
-            canvas.draw_rect(to_sk_rect(rect), &p);
+            canvas.draw_rect(bounds, paint);
         }
+    };
+    if let Some(paint) = fill {
+        draw(paint);
+    }
+    if let Some(stroke) = stroke {
+        let mut paint = SkPaint::new(to_sk_color(stroke.color), None);
+        paint.set_style(PaintStyle::Stroke);
+        paint.set_stroke_width(stroke.width);
+        crate::raster_sampling::configure_geometry(&mut paint);
+        draw(&paint);
     }
 }
 
