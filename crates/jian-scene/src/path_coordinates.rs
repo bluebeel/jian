@@ -1,6 +1,6 @@
 //! Explicit document-path coordinates; absent metadata keeps legacy tight fit.
 use jian_widgets::{Point2D, Rect};
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ScenePathGeometry {
     pub view_box: [f32; 4],
     pub local_bounds: Option<Rect>,
