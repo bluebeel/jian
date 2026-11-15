@@ -35,6 +35,22 @@ pub fn capture_snapshot() -> ImageThumbSnapshot {
 }
 
 impl ImageThumbSnapshot {
+    /// Exact registry equality; Arc identity avoids rereading unchanged bytes.
+    pub fn same_contents(&self, other: &Self) -> bool {
+        self.0.len() == other.0.len()
+            && self.0.iter().all(|(id, bytes)| {
+                other
+                    .0
+                    .get(id)
+                    .is_some_and(|old| Arc::ptr_eq(old, bytes) || old.as_ref() == bytes.as_ref())
+            })
+    }
+    /// Conservative retained charge, including shared payloads and map slack.
+    pub fn storage_bytes(&self) -> usize {
+        self.0.capacity() * (std::mem::size_of::<(u64, Arc<[u8]>)>() + 16)
+            + self.0.values().map(|bytes| bytes.len() + 32).sum::<usize>()
+    }
+
     pub(crate) fn serialized_for(&self, referenced_ids: &BTreeSet<u64>) -> Map<String, Value> {
         referenced_ids
             .iter()
