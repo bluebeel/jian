@@ -44,8 +44,8 @@ mod styled;
 
 pub(crate) use save::scoped_reference;
 pub use save::{
-    visit_legacy_node_roots, with_save_scope, without_save_scope, write_document,
-    write_document_compact_with_extension, write_document_with_extension,
+    visit_legacy_node_roots, visit_node_image_sources, with_save_scope, without_save_scope,
+    write_document, write_document_compact_with_extension, write_document_with_extension,
     write_object_compact_with_extension, SaveImageOrder, SaveImageTable, SaveTableWriteStats,
     SaveTables,
 };

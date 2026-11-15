@@ -57,6 +57,13 @@ pub fn visit_legacy_node_roots<'a>(
     }
 }
 
+/// Visit exactly this node's typed image sources in canonical save order,
+/// including styled runs and widget states, without visiting descendants.
+#[doc(hidden)]
+pub fn visit_node_image_sources(node: &PenNode, visit: &mut dyn FnMut(&crate::node::ImageSrc)) {
+    let _ = visit_own_sources(node, visit);
+}
+
 fn visit_own_sources<'a>(
     node: &'a PenNode,
     visit: &mut dyn FnMut(&crate::node::ImageSrc),

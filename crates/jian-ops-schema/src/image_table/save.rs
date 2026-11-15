@@ -27,7 +27,7 @@ mod identity;
 mod object;
 mod order;
 pub use object::write_object_compact_with_extension;
-pub use order::{visit_legacy_node_roots, SaveImageOrder};
+pub use order::{visit_legacy_node_roots, visit_node_image_sources, SaveImageOrder};
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 struct AllocationKey {
