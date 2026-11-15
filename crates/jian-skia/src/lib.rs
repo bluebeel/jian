@@ -51,6 +51,7 @@ pub(crate) mod image;
 pub mod image_registry;
 #[cfg(feature = "textlayout")]
 pub mod measure;
+pub mod mesh_geometry;
 pub mod path;
 pub mod raster_sampling;
 pub mod shader_cache;

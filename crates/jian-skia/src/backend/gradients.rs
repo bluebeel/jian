@@ -162,53 +162,26 @@ pub(super) fn draw_mesh_gradient_rect(
     g: &jian_core::render::MeshGradient,
     stroke: Option<&jian_core::render::StrokeOp>,
 ) {
-    use skia_safe::{vertices::VertexMode, BlendMode as SkBlendMode, Vertices};
+    use skia_safe::BlendMode as SkBlendMode;
 
-    let rows = g.rows.max(2);
-    let cols = g.cols.max(2);
-    let vcount = (rows * cols) as usize;
-    if g.colors.len() != vcount {
+    let Some(vertices) = crate::mesh_geometry::lattice_vertices(
+        [
+            rect.min_x(),
+            rect.min_y(),
+            rect.size.width,
+            rect.size.height,
+        ],
+        g.rows,
+        g.cols,
+        g.colors.len(),
+        |i| {
+            let jc = g.colors[i];
+            Color::from_argb(jc.a(), jc.r(), jc.g(), jc.b())
+        },
+    ) else {
+        crate::raster_sampling::mark_unsupported("invalid or unrepresentable mesh grid");
         return;
-    }
-
-    // Lattice vertex positions across the rect: vertex (r, c) maps to
-    // (c/(cols-1), r/(rows-1)) of the rect. Colours come straight from
-    // the row-major grid; `texs` is unused (no shader) but must match
-    // the vertex count, so we reuse `positions`.
-    let mut positions: Vec<SkPoint> = Vec::with_capacity(vcount);
-    let mut colors: Vec<Color> = Vec::with_capacity(vcount);
-    let denom_c = (cols - 1) as f32;
-    let denom_r = (rows - 1) as f32;
-    for r in 0..rows {
-        for c in 0..cols {
-            let fx = rect.min_x() + (c as f32 / denom_c) * rect.size.width;
-            let fy = rect.min_y() + (r as f32 / denom_r) * rect.size.height;
-            positions.push(SkPoint::new(fx, fy));
-            let jc = g.colors[(r * cols + c) as usize];
-            colors.push(Color::from_argb(jc.a(), jc.r(), jc.g(), jc.b()));
-        }
-    }
-
-    // Triangulate each grid cell into two triangles (CCW). Index of
-    // vertex (r, c) is `r * cols + c`.
-    let mut indices: Vec<u16> = Vec::with_capacity(((rows - 1) * (cols - 1) * 6) as usize);
-    for r in 0..(rows - 1) {
-        for c in 0..(cols - 1) {
-            let tl = (r * cols + c) as u16;
-            let tr = (r * cols + c + 1) as u16;
-            let bl = ((r + 1) * cols + c) as u16;
-            let br = ((r + 1) * cols + c + 1) as u16;
-            indices.extend_from_slice(&[tl, tr, bl, tr, br, bl]);
-        }
-    }
-
-    let vertices = Vertices::new_copy(
-        VertexMode::Triangles,
-        &positions,
-        &positions,
-        &colors,
-        Some(&indices),
-    );
+    };
 
     // Clip to the node's round-rect so the Gouraud fill respects corner
     // radius, then draw the per-vertex-coloured triangles. SrcOver blends
