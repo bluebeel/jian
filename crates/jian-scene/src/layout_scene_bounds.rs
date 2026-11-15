@@ -13,7 +13,10 @@ impl SceneNode {
     /// A clipping container stops the walk at its own bounds.
     pub fn visual_bounds(&self) -> Rect {
         Self::compute_visual_bounds(
-            self.bounds,
+            self.svg_view_box
+                .as_ref()
+                .and_then(|geometry| geometry.map_bounds(self.bounds))
+                .unwrap_or(self.bounds),
             self.hidden,
             self.clip_content,
             self.children.iter().map(SceneNode::visual_bounds),

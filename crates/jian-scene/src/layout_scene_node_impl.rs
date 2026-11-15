@@ -193,6 +193,7 @@ impl SceneNode {
             mask_type: None,
             even_odd_fill: false,
             svg_path: None,
+            svg_view_box: None,
             arc_start_angle: None,
             arc_sweep_angle: None,
             arc_inner_radius: None,

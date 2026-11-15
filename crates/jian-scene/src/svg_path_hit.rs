@@ -137,6 +137,7 @@ pub(super) fn contains(node: &SceneNode, point: Point2D, zoom: f32) -> bool {
     // can extend slightly beyond a smaller positive authored dimension.
     let broad_slack = tolerance + 0.01;
     if fitted
+        && node.svg_view_box.is_none()
         && (local.x < -broad_slack
             || local.y < -broad_slack
             || local.x > size.0 + broad_slack
@@ -150,7 +151,18 @@ pub(super) fn contains(node: &SceneNode, point: Point2D, zoom: f32) -> bool {
     // Match native/Web paint: fit tight curve bounds for positive authored
     // dimensions, otherwise translate the original geometry unchanged.
     let (sx, sy, x0, y0) = if fitted {
-        let native = geometry.bounds;
+        let native = node
+            .svg_view_box
+            .as_ref()
+            .map_or(geometry.bounds, |source| {
+                let [x, y, w, h] = source.view_box;
+                kurbo::Rect::new(
+                    f64::from(x),
+                    f64::from(y),
+                    f64::from(x) + f64::from(w),
+                    f64::from(y) + f64::from(h),
+                )
+            });
         (
             if native.width().abs() > 0.01 {
                 size.0 / native.width()

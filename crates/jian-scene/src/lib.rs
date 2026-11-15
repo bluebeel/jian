@@ -7,6 +7,7 @@ pub mod layout_scene;
 mod layout_scene_bounds;
 mod layout_scene_fill;
 pub mod layout_scene_hit;
+pub mod path_coordinates;
 pub mod path_geometry;
 mod scene_geometry;
 pub mod scene_hit_index;

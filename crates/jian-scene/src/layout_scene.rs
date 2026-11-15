@@ -587,6 +587,8 @@ pub struct SceneNode {
     /// Preserved SVG path data for imported Path nodes. Coordinates
     /// are local doc-px relative to `bounds.origin`.
     pub svg_path: Option<String>,
+    /// Exact source-coordinate mapping, independent of authored selection bounds.
+    pub svg_view_box: Option<std::sync::Arc<crate::path_coordinates::ScenePathGeometry>>,
     /// Ellipse arc start angle in degrees. `None` = full ellipse.
     pub arc_start_angle: Option<f32>,
     /// Ellipse arc sweep angle in degrees. `None` = full ellipse.

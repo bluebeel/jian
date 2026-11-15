@@ -165,6 +165,13 @@ fn capture(node: &SceneNode, index: &mut HashMap<usize, Bounds>) -> Bounds {
     let aggregate = node.aggregate_bounds();
     let mut bounds = Bounds::rect(aggregate);
     bounds.union(Bounds::rect(node.bounds));
+    if let Some(geometry) = &node.svg_view_box {
+        if let Some(ink) = geometry.map_bounds(node.bounds) {
+            bounds.union(Bounds::rect(ink));
+        } else {
+            bounds = Bounds::UNBOUNDED;
+        }
+    }
     if matches!(node.kind, NodeKind::Path) {
         if node.svg_path.is_some() && (node.bounds.size.x <= 0.0 || node.bounds.size.y <= 0.0) {
             // Degenerate SVG paths translate without fitting; their native
