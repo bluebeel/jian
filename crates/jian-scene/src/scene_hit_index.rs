@@ -204,3 +204,61 @@ fn capture(node: &SceneNode, index: &mut HashMap<usize, Bounds>) -> Bounds {
     index.insert(node as *const SceneNode as usize, bounds);
     bounds
 }
+
+/// The exact top-level selection AABBs used by marquee, prepared without the
+/// per-descendant point-picking index. Same immutable scene identity rule.
+pub struct SceneMarqueeIndex {
+    owner: Weak<LayoutScene>,
+    bounds: Vec<Option<[f64; 4]>>,
+}
+impl SceneMarqueeIndex {
+    pub fn new(scene: &Arc<LayoutScene>) -> Self {
+        let bounds = scene.active_page().map_or_else(Vec::new, |page| {
+            page.children
+                .iter()
+                .map(|node| {
+                    if node.hidden || node.locked {
+                        None
+                    } else {
+                        crate::layout_scene_hit::selection_aabb(node)
+                    }
+                })
+                .collect()
+        });
+        Self {
+            owner: Arc::downgrade(scene),
+            bounds,
+        }
+    }
+    pub fn storage_bytes(&self) -> usize {
+        size_of::<Self>() + self.bounds.capacity() * size_of::<Option<[f64; 4]>>()
+    }
+    pub fn nodes_intersecting_doc_rect(&self, scene: &Arc<LayoutScene>, rect: Rect) -> Vec<String> {
+        if !Weak::ptr_eq(&self.owner, &Arc::downgrade(scene)) {
+            return scene.nodes_intersecting_doc_rect(rect);
+        }
+        let Some(page) = scene.active_page() else {
+            return Vec::new();
+        };
+        let nx = rect.origin.x.min(rect.origin.x + rect.size.x);
+        let ny = rect.origin.y.min(rect.origin.y + rect.size.y);
+        let nw = rect.size.x.abs();
+        let nh = rect.size.y.abs();
+        page.children
+            .iter()
+            .zip(&self.bounds)
+            .filter_map(|(node, bounds)| {
+                let [bx, by, right, bottom] = (*bounds)?;
+                if right < f64::from(nx)
+                    || f64::from(nx) + f64::from(nw) < bx
+                    || bottom < f64::from(ny)
+                    || f64::from(ny) + f64::from(nh) < by
+                {
+                    None
+                } else {
+                    Some(node.id.clone())
+                }
+            })
+            .collect()
+    }
+}

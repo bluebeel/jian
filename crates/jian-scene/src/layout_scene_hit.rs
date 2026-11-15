@@ -119,7 +119,7 @@ impl LayoutScene {
     }
 }
 
-fn selection_aabb(node: &SceneNode) -> Option<[f64; 4]> {
+pub(crate) fn selection_aabb(node: &SceneNode) -> Option<[f64; 4]> {
     let aggregate = node.aggregate_bounds();
     let bounds = if matches!(node.kind, NodeKind::Line) {
         node.bounds
