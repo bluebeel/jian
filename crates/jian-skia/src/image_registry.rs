@@ -28,10 +28,20 @@ impl InstanceImageRegistry {
 
     fn insert(&mut self, key: &str, bytes: &[u8]) {
         let bytes = Arc::new(bytes.to_vec());
-        if let Some(old) = self.images.insert(key.to_owned(), bytes.clone()) {
+        let len = bytes.len();
+        if let Some(slot) = self.images.get_mut(key) {
+            let old = std::mem::replace(slot, bytes);
             self.pinned_bytes = self.pinned_bytes.saturating_sub(old.len());
+        } else {
+            self.images.insert(key.to_owned(), bytes);
         }
-        self.pinned_bytes = self.pinned_bytes.saturating_add(bytes.len());
+        self.pinned_bytes = self.pinned_bytes.saturating_add(len);
+    }
+
+    fn contains_exact(&self, key: &str, bytes: &[u8]) -> bool {
+        self.images
+            .get(key)
+            .is_some_and(|old| old.as_slice() == bytes)
     }
 
     fn remove(&mut self, key: &str) {
@@ -100,6 +110,12 @@ impl RenderBackend for RegisteredBackend<'_> {
     }
 
     fn register_image(&mut self, key: &str, bytes: &[u8]) -> Result<(), DecodeError> {
+        // Registered buffers are immutable strong Arc owners and were already
+        // validated. Preserve that owner so repeated registration also keeps
+        // the decoded-image identity fast path hot.
+        if self.images.contains_exact(key, bytes) {
+            return Ok(());
+        }
         jian_core::render::probe_image_bounds(bytes)?;
         self.images.insert(key, bytes);
         Ok(())
