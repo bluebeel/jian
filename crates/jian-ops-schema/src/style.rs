@@ -1,4 +1,5 @@
 mod gradient_geometry;
+mod paint_visibility;
 pub use gradient_geometry::*;
 
 use serde::{Deserialize, Serialize};
@@ -92,6 +93,9 @@ pub enum PenFill {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct SolidFillBody {
+    /// Absent retains the historical enabled paint behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     pub color: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explain: Option<String>,
@@ -106,6 +110,9 @@ pub struct SolidFillBody {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct LinearGradientBody {
+    /// Absent retains the historical enabled paint behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geometry: Option<Box<GradientGeometry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -124,6 +131,9 @@ pub struct LinearGradientBody {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct RadialGradientBody {
+    /// Absent retains the historical enabled paint behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geometry: Option<Box<GradientGeometry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -163,6 +173,9 @@ pub struct MeshVertexStop {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct MeshGradientBody {
+    /// Absent retains the historical enabled paint behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     pub rows: u32,
     pub cols: u32,
     pub stops: Vec<MeshVertexStop>,
@@ -225,6 +238,9 @@ pub enum ShaderPresetV1 {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct ShaderFillBody {
+    /// Absent retains the historical enabled paint behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     /// Loader-expanded source selector. Only `"turbulence"` is recognized
     /// in v1; expansion is runtime-only and is never serialized into `sksl`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -250,11 +266,19 @@ pub struct ShaderFillBody {
     pub blend_mode: Option<BlendMode>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct ImageFillBody {
+    /// Absent retains the historical enabled paint behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Explicit affine image/tile geometry. Absent values retain legacy modes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature="export-ts",ts(optional=nullable))]
+    pub geometry: Option<Box<ImageFieldGeometry>>,
+
     // Image-fill source — an `Arc`-shared string (`data:` URL or path),
     // same rationale as `ImageNode.src` (see `crate::node::ImageSrc`): a
     // multi-MB data URL here is otherwise cloned + content-compared on
@@ -498,6 +522,9 @@ pub struct StyledTextSegment {
     pub font_style: Option<FontStyleKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<String>,
+    /// Optional complete authored paint stack. Absence inherits `fill`/node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_paints: Option<Vec<PenFill>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub underline: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -725,29 +752,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod decoration_metadata_tests {
-    use crate::node::PenNode;
-    #[test]
-    fn decoration_metadata_roundtrips_false_and_keeps_legacy_absence() {
-        let node: PenNode = serde_json::from_value(serde_json::json!({
-            "id":"text", "type":"text", "textDecorationSkipInk":false,
-            "content":[{"text":"A", "textDecorationSkipInk":true}, {"text":"é"}]
-        }))
-        .unwrap();
-        let value = serde_json::to_value(&node).unwrap();
-        assert_eq!(value["textDecorationSkipInk"], false);
-        assert_eq!(value["content"][0]["textDecorationSkipInk"], true);
-        assert!(value["content"][1].get("textDecorationSkipInk").is_none());
-        let legacy: PenNode = serde_json::from_value(
-            serde_json::json!({"id":"old","type":"text","content":"legacy"}),
-        )
-        .unwrap();
-        assert!(serde_json::to_value(legacy)
-            .unwrap()
-            .get("textDecorationSkipInk")
-            .is_none());
-    }
-}
+mod decoration_metadata_tests;
 
 #[cfg(test)]
 mod shadow_profile_tests {
@@ -772,3 +777,9 @@ mod shadow_profile_tests {
 
 #[cfg(test)]
 mod precision_tests;
+
+mod image_geometry;
+pub use image_geometry::{
+    ImageExtend, ImageFieldGeometry, ImageFieldUnits, ImagePatternGeometry, ImageRepeat,
+    ImageViewportFit, ImageViewportGeometry,
+};

@@ -69,6 +69,7 @@ pub struct ImagePaintThumbnail<'a> {
 /// Image paint parameters shared by viewport and export backends.
 #[derive(Debug, Clone, Copy)]
 pub struct ImagePaintOptions<'a> {
+    pub geometry: Option<&'a jian_ops_schema::style::ImageFieldGeometry>,
     pub mode: ImageDrawMode,
     pub adjustments: ImageAdjustments,
     pub opacity: f32,
@@ -85,6 +86,7 @@ pub struct ImagePaintOptions<'a> {
 impl Default for ImagePaintOptions<'_> {
     fn default() -> Self {
         Self {
+            geometry: None,
             mode: ImageDrawMode::Fill,
             adjustments: ImageAdjustments::default(),
             opacity: 1.0,

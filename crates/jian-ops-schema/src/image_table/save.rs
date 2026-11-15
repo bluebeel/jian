@@ -412,6 +412,8 @@ mod tests {
 
     fn image_node(id: &str, source: ImageSrc) -> PenNode {
         PenNode::Image(ImageNode {
+            nearest_sampling: None,
+            geometry: None,
             base: PenNodeBase {
                 id: id.to_owned(),
                 ..Default::default()

@@ -23,6 +23,8 @@ pub enum SceneFillLayer {
         blend_mode: ImageBlendMode,
     },
     Image {
+        geometry: Option<Arc<jian_ops_schema::style::ImageFieldGeometry>>,
+        paint: Option<Arc<jian_ops_schema::style::ImageFillBody>>,
         src: Arc<str>,
         src_id: u64,
         thumbnail_src: Option<Arc<str>>,

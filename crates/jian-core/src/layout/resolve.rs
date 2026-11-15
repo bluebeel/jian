@@ -304,6 +304,14 @@ pub(crate) fn apply_limits(style: &mut Style, limits: &jian_ops_schema::sizing::
 /// at a fixed offset inside a layer).
 pub fn node_to_style(n: &jian_ops_schema::node::PenNode) -> Style {
     use jian_ops_schema::node::PenNode;
+    // Hidden layers stay editable in the schema but occupy no auto-layout
+    // track. Opacity zero is different: it still participates in layout.
+    if node_base(n).is_some_and(|base| base.visible == Some(false)) {
+        return Style {
+            display: Display::None,
+            ..Default::default()
+        };
+    }
     let mut style = match n {
         PenNode::Frame(f) => container_to_style(&f.container),
         PenNode::Group(g) => container_to_style(&g.container),

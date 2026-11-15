@@ -34,3 +34,8 @@ pub fn centered_text_baseline_y(rect: Rect, font_size: f32) -> f32 {
 
 mod stroke_paint;
 pub use stroke_paint::*;
+
+pub use jian_ops_schema::style::{
+    ImageExtend, ImageFieldGeometry, ImageFieldUnits, ImagePatternGeometry, ImageRepeat,
+    ImageViewportFit, ImageViewportGeometry,
+};

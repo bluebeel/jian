@@ -40,6 +40,7 @@
 use serde_json::{Map, Value};
 
 mod save;
+mod styled;
 
 pub(crate) use save::scoped_reference;
 pub use save::{
@@ -102,10 +103,12 @@ fn visit_image_strings_mut(root: &mut Value, f: &mut impl FnMut(&mut String)) {
             continue;
         };
         let image_node = is_image_typed(node);
+        let text_node = node.get("type").and_then(Value::as_str) == Some("text");
         for (k, v) in node.iter_mut() {
             match (k.as_str(), v) {
                 ("src", Value::String(s)) if image_node => f(s),
                 ("fill", fill) => visit_fill_array_mut(fill, f),
+                ("content", content) if text_node => styled::visit_mut(content, f),
                 ("stroke", stroke) => visit_stroke_mut(stroke, f),
                 ("states", Value::Object(states)) => {
                     for override_value in states.values_mut() {
@@ -314,10 +317,12 @@ fn visit_image_strings_ref(root: &Value, f: &mut impl FnMut(&str)) {
             continue;
         };
         let image_node = is_image_typed(node);
+        let text_node = node.get("type").and_then(Value::as_str) == Some("text");
         for (k, v) in node {
             match (k.as_str(), v) {
                 ("src", Value::String(s)) if image_node => f(s),
                 ("fill", fill) => visit_fill_array_ref(fill, f),
+                ("content", content) if text_node => styled::visit_ref(content, f),
                 ("stroke", stroke) => visit_stroke_ref(stroke, f),
                 ("states", Value::Object(states)) => {
                     for override_value in states.values() {

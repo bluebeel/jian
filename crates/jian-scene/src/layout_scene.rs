@@ -441,38 +441,9 @@ pub enum SceneTextVerticalAlign {
 /// their segment's style. A wrapped line that splits mid-segment keeps
 /// per-slice styling exact; only the WRAP POSITION itself is computed
 /// with node-level metrics (documented v1 approximation).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SceneTextRun {
-    /// Inclusive start byte offset into the node's flat `text`.
-    pub start: usize,
-    /// Exclusive end byte offset into the node's flat `text`.
-    pub end: usize,
-    /// Per-run font size in doc-px. `0.0` = inherit the node's.
-    pub font_size: f32,
-    /// Per-run CSS-style weight (100-900). `0` = inherit the node's.
-    pub font_weight: u16,
-    /// Per-run fill colour. `None` = inherit the node's resolved fill.
-    pub fill: Option<Color>,
-    /// Render this run with an italic (slanted) face.
-    pub italic: bool,
-    /// Stroke an underline beneath this run's painted slices.
-    pub underline: bool,
-    /// Stroke a strikethrough across this run's painted slices.
-    pub strikethrough: bool,
-    pub text_decoration_skip_ink: Option<bool>,
-}
-
-/// Video playback metadata carried by an image poster in the render scene.
-/// The scene paints only the poster; HTML export consumes the playback fields.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SceneVideo {
-    pub src: Arc<str>,
-    pub autoplay: bool,
-    pub r#loop: bool,
-    pub muted: bool,
-    pub hold_last_frame: bool,
-    pub click_to_replay: bool,
-}
+#[path = "layout_scene_text.rs"]
+mod text;
+pub use text::{SceneTextRun, SceneVideo};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneNode {
@@ -536,6 +507,10 @@ pub struct SceneNode {
     /// Complete canonical fill stack, ordered front-to-back. Empty means this
     /// scene came from a legacy payload and the single-fill fields apply.
     pub fill_layers: Vec<SceneFillLayer>,
+    /// Authored nonempty paint stacks with every layer disabled. These are
+    /// not legacy missing styles and must not acquire implicit black ink.
+    pub fill_disabled: bool,
+    pub stroke_disabled: bool,
     /// Fill paint mode — `Solid` / `LinearGradient` / `RadialGradient`
     /// / `Image`. The current canvas paints all of them as the solid
     /// `fill` colour; carried so a richer painter can branch later.
@@ -651,6 +626,8 @@ pub struct SceneNode {
     pub image_transform: Option<[f32; 6]>,
     /// Authored image-fill rotation, preserved in degrees for source fitting.
     pub image_rotation_degrees: Option<f32>,
+    pub image_geometry: Option<std::sync::Arc<jian_ops_schema::style::ImageFieldGeometry>>,
+    pub image_paint: Option<std::sync::Arc<jian_ops_schema::style::ImageFillBody>>,
     /// Authored source dimensions used to keep TILE frequency stable when the
     /// backend holds a downsampled raster. Invalid/absent values use the raster.
     pub image_original_size: Option<[f32; 2]>,

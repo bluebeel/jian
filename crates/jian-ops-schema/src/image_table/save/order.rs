@@ -107,6 +107,11 @@ fn visit_own_sources<'a>(
             None
         }
         PenNode::Text(node) => {
+            if let crate::node::text::TextContent::Styled(segments) = &node.content {
+                for segment in segments {
+                    visit_fills(segment.fill_paints.as_deref(), visit);
+                }
+            }
             visit_fills(node.fill.as_deref(), visit);
             None
         }

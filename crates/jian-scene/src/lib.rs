@@ -17,3 +17,8 @@ pub mod snapping;
 
 mod stroke_paint;
 pub use stroke_paint::{SceneStrokePaint, StrokePaintCap, StrokePaintJoin, StrokePaintStyle};
+
+pub use jian_ops_schema::style::{
+    ImageExtend, ImageFieldGeometry, ImageFieldUnits, ImagePatternGeometry, ImageRepeat,
+    ImageViewportFit, ImageViewportGeometry,
+};

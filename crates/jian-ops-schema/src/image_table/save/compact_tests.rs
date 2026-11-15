@@ -41,6 +41,8 @@ fn check_compact_matches_legacy_json_and_deduplicates_equal_and_shared_images() 
     document
         .children
         .push(PenNode::Image(crate::node::ImageNode {
+            nearest_sampling: None,
+            geometry: None,
             src: shared,
             ..match document.children[0].clone() {
                 PenNode::Image(image) => image,
