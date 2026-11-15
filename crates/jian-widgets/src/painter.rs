@@ -5,12 +5,14 @@ mod image_options;
 mod shadow_options;
 mod text_decoration;
 mod text_layout;
+mod text_mask;
 pub use image_options::{
     ImageAdjustments, ImageBlendMode, ImageDrawMode, ImagePaintOptions, ImagePaintThumbnail,
 };
 pub use shadow_options::{RoundRectShadowOptions, ShadowBlurKernel};
 pub use text_decoration::TextDecorationRequest;
 pub use text_layout::{TextBaselineRequest, TextLayout};
+pub use text_mask::{TextMaskAction, TextMaskResult};
 
 /// Backend abstraction used by cross-platform widgets.
 pub trait Painter {
@@ -314,6 +316,16 @@ pub trait Painter {
     fn push_paint_space(&mut self, rect: crate::Rect) {
         let _ = rect;
         self.save();
+    }
+    /// Finite local coverage for a paint field, including text overhang. None
+    /// retains the compatibility painter without introducing a new clip.
+    fn paint_field_bounds(&mut self) -> Option<Rect> {
+        None
+    }
+    /// One lexical prepared glyph/decor mask. Replay refusal draws nothing;
+    /// callers must discard or replay before leaving the owning paint scope.
+    fn text_mask_capture(&mut self, _action: TextMaskAction) -> TextMaskResult {
+        TextMaskResult::Unavailable
     }
     fn pop_paint_space(&mut self) {
         self.restore();

@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SceneTextRun {
     /// Inclusive start byte offset into the node's flat `text`.
     pub start: usize,
@@ -13,6 +13,9 @@ pub struct SceneTextRun {
     /// Per-run fill colour. `None` = inherit the node's resolved fill.
     pub fill: Option<Color>,
     pub fill_disabled: bool,
+    /// Optional authored paint stack, front-to-back; an empty stack disables
+    /// paint without removing the run or changing its font/layout geometry.
+    pub fill_layers: Option<Arc<Vec<SceneFillLayer>>>,
     /// Render this run with an italic (slanted) face.
     pub italic: bool,
     /// Stroke an underline beneath this run's painted slices.
