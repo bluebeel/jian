@@ -1,10 +1,12 @@
 pub mod base;
+mod boxed_optional;
 mod buf;
 pub mod checkbox;
 pub mod container;
 mod de;
 pub mod ellipse;
 pub mod frame;
+mod geometry_nulls;
 mod glue;
 pub mod icon_font;
 pub mod image;
@@ -55,15 +57,13 @@ pub use text_area::TextAreaNode;
 pub use text_input::TextInputNode;
 pub use video::VideoMeta;
 
-use serde::Serialize;
-
 /// Union of all concrete node types.
 /// Tag is the JSON `"type"` field.
 // `Deserialize` (in `de.rs`) and `Clone`/`PartialEq` (in `glue.rs`) are
 // hand-written with the derives' exact semantics, so their bodies are
 // compiled once instead of once per crate. (Plain comment: doc comments
 // flow into the exported JSON schema.)
-#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[derive(Debug, schemars::JsonSchema)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -101,47 +101,90 @@ impl PenNode {
         Option<&Vec<crate::motion::NodeAnimation>>,
     ) {
         match self {
-            PenNode::Frame(node) => (node.base.transition.as_ref(), node.base.animations.as_ref()),
-            PenNode::Group(node) => (node.base.transition.as_ref(), node.base.animations.as_ref()),
-            PenNode::Rectangle(node) => {
-                (node.base.transition.as_ref(), node.base.animations.as_ref())
-            }
-            PenNode::Ellipse(node) => {
-                (node.base.transition.as_ref(), node.base.animations.as_ref())
-            }
-            PenNode::Line(node) => (node.base.transition.as_ref(), node.base.animations.as_ref()),
-            PenNode::Polygon(node) => {
-                (node.base.transition.as_ref(), node.base.animations.as_ref())
-            }
-            PenNode::Path(node) => (node.base.transition.as_ref(), node.base.animations.as_ref()),
-            PenNode::Text(node) => (node.base.transition.as_ref(), node.base.animations.as_ref()),
-            PenNode::TextInput(node) => {
-                (node.base.transition.as_ref(), node.base.animations.as_ref())
-            }
-            PenNode::Image(node) => (node.base.transition.as_ref(), node.base.animations.as_ref()),
-            PenNode::IconFont(node) => {
-                (node.base.transition.as_ref(), node.base.animations.as_ref())
-            }
-            PenNode::TextArea(node) => {
-                (node.base.transition.as_ref(), node.base.animations.as_ref())
-            }
-            PenNode::Select(node) => (node.base.transition.as_ref(), node.base.animations.as_ref()),
-            PenNode::Switch(node) => (node.base.transition.as_ref(), node.base.animations.as_ref()),
-            PenNode::Checkbox(node) => {
-                (node.base.transition.as_ref(), node.base.animations.as_ref())
-            }
-            PenNode::Slider(node) => (node.base.transition.as_ref(), node.base.animations.as_ref()),
-            PenNode::RadioGroup(node) => {
-                (node.base.transition.as_ref(), node.base.animations.as_ref())
-            }
-            PenNode::NumberInput(node) => {
-                (node.base.transition.as_ref(), node.base.animations.as_ref())
-            }
-            PenNode::Progress(node) => {
-                (node.base.transition.as_ref(), node.base.animations.as_ref())
-            }
-            PenNode::Tabs(node) => (node.base.transition.as_ref(), node.base.animations.as_ref()),
-            PenNode::Ref(node) => (node.base.transition.as_ref(), node.base.animations.as_ref()),
+            PenNode::Frame(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Group(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Rectangle(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Ellipse(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Line(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Polygon(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Path(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Text(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::TextInput(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Image(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::IconFont(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::TextArea(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Select(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Switch(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Checkbox(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Slider(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::RadioGroup(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::NumberInput(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Progress(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Tabs(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
+            PenNode::Ref(node) => (
+                node.base.transition.as_deref(),
+                node.base.animations.as_ref(),
+            ),
         }
     }
 
@@ -173,27 +216,27 @@ impl PenNode {
         Option<&crate::semantics::SemanticsMeta>,
     ) {
         match self {
-            PenNode::Frame(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Group(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Rectangle(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Ellipse(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Line(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Polygon(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Path(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Text(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::TextInput(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Image(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::IconFont(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::TextArea(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Select(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Switch(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Checkbox(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Slider(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::RadioGroup(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::NumberInput(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Progress(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Tabs(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
-            PenNode::Ref(n) => (n.gestures.as_ref(), n.semantics.as_ref()),
+            PenNode::Frame(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Group(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Rectangle(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Ellipse(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Line(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Polygon(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Path(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Text(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::TextInput(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Image(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::IconFont(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::TextArea(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Select(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Switch(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Checkbox(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Slider(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::RadioGroup(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::NumberInput(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Progress(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Tabs(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
+            PenNode::Ref(n) => (n.gestures.as_deref(), n.semantics.as_deref()),
         }
     }
 
@@ -204,27 +247,27 @@ impl PenNode {
     /// through `serde_json::to_value`.
     pub fn lifecycle(&self) -> Option<&crate::lifecycle::NodeLifecycleHooks> {
         match self {
-            PenNode::Frame(n) => n.lifecycle.as_ref(),
-            PenNode::Group(n) => n.lifecycle.as_ref(),
-            PenNode::Rectangle(n) => n.lifecycle.as_ref(),
-            PenNode::Ellipse(n) => n.lifecycle.as_ref(),
-            PenNode::Line(n) => n.lifecycle.as_ref(),
-            PenNode::Polygon(n) => n.lifecycle.as_ref(),
-            PenNode::Path(n) => n.lifecycle.as_ref(),
-            PenNode::Text(n) => n.lifecycle.as_ref(),
-            PenNode::TextInput(n) => n.lifecycle.as_ref(),
-            PenNode::Image(n) => n.lifecycle.as_ref(),
-            PenNode::IconFont(n) => n.lifecycle.as_ref(),
-            PenNode::TextArea(n) => n.lifecycle.as_ref(),
-            PenNode::Select(n) => n.lifecycle.as_ref(),
-            PenNode::Switch(n) => n.lifecycle.as_ref(),
-            PenNode::Checkbox(n) => n.lifecycle.as_ref(),
-            PenNode::Slider(n) => n.lifecycle.as_ref(),
-            PenNode::RadioGroup(n) => n.lifecycle.as_ref(),
-            PenNode::NumberInput(n) => n.lifecycle.as_ref(),
-            PenNode::Progress(n) => n.lifecycle.as_ref(),
-            PenNode::Tabs(n) => n.lifecycle.as_ref(),
-            PenNode::Ref(n) => n.lifecycle.as_ref(),
+            PenNode::Frame(n) => n.lifecycle.as_deref(),
+            PenNode::Group(n) => n.lifecycle.as_deref(),
+            PenNode::Rectangle(n) => n.lifecycle.as_deref(),
+            PenNode::Ellipse(n) => n.lifecycle.as_deref(),
+            PenNode::Line(n) => n.lifecycle.as_deref(),
+            PenNode::Polygon(n) => n.lifecycle.as_deref(),
+            PenNode::Path(n) => n.lifecycle.as_deref(),
+            PenNode::Text(n) => n.lifecycle.as_deref(),
+            PenNode::TextInput(n) => n.lifecycle.as_deref(),
+            PenNode::Image(n) => n.lifecycle.as_deref(),
+            PenNode::IconFont(n) => n.lifecycle.as_deref(),
+            PenNode::TextArea(n) => n.lifecycle.as_deref(),
+            PenNode::Select(n) => n.lifecycle.as_deref(),
+            PenNode::Switch(n) => n.lifecycle.as_deref(),
+            PenNode::Checkbox(n) => n.lifecycle.as_deref(),
+            PenNode::Slider(n) => n.lifecycle.as_deref(),
+            PenNode::RadioGroup(n) => n.lifecycle.as_deref(),
+            PenNode::NumberInput(n) => n.lifecycle.as_deref(),
+            PenNode::Progress(n) => n.lifecycle.as_deref(),
+            PenNode::Tabs(n) => n.lifecycle.as_deref(),
+            PenNode::Ref(n) => n.lifecycle.as_deref(),
         }
     }
 }

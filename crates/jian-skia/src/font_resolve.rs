@@ -52,18 +52,9 @@ pub struct ResolvedTypeface {
     pub synthetic_italic: bool,
 }
 
-#[derive(Default)]
-struct FontResolverCache {
-    chars: HashMap<FontKey, Option<ResolvedTypeface>>,
-}
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct FontKey {
-    families: Vec<String>,
-    codepoint: i32,
-    weight: u16,
-    italic: bool,
-}
+#[path = "font_resolve_cache.rs"]
+mod cache;
+use cache::{FontKey, FontResolverCache};
 
 /// Shared typeface resolver for Skia-backed text paths.
 ///
@@ -160,7 +151,7 @@ impl FontResolver {
         *self.bundled_family_names.borrow_mut() = bundled_family_names;
         *self.imported_mgr.borrow_mut() = imported_mgr;
         *self.imported_family_names.borrow_mut() = imported_family_names;
-        self.cache.borrow_mut().chars.clear();
+        *self.cache.borrow_mut() = FontResolverCache::default();
         self.built_generation.set(current);
     }
 
@@ -222,22 +213,19 @@ impl FontResolver {
         italic: bool,
     ) -> Option<ResolvedTypeface> {
         self.refresh_if_stale();
-        let families = font_family_candidates(family);
+        let families = self.prepared_families(family);
         self.typeface_for_char_in_families(&families, c, weight, italic)
     }
 
     fn typeface_for_char_in_families(
         &self,
-        families: &[String],
+        families: &cache::Families,
         c: char,
         weight: u16,
         italic: bool,
     ) -> Option<ResolvedTypeface> {
         let key = FontKey {
-            families: families
-                .iter()
-                .map(|family| family.to_ascii_lowercase())
-                .collect(),
+            families: std::sync::Arc::clone(&families.folded),
             codepoint: c as i32,
             weight,
             italic,
@@ -248,8 +236,9 @@ impl FontResolver {
         // Cache miss → `match_family_style_character` (DirectWrite system font
         // scan on Windows). Serialize just this call so the per-char cached
         // fast path above stays lock-free.
-        let resolved =
-            crate::font_lock::with_font_lock(|| self.resolve_uncached(families, c, weight, italic));
+        let resolved = crate::font_lock::with_font_lock(|| {
+            self.resolve_uncached(&families.raw, c, weight, italic)
+        });
         self.cache.borrow_mut().chars.insert(key, resolved.clone());
         resolved
     }
@@ -262,7 +251,7 @@ impl FontResolver {
         italic: bool,
     ) -> Vec<FontSegment> {
         self.refresh_if_stale();
-        let families = font_family_candidates(family);
+        let families = self.prepared_families(family);
         let mut segments: Vec<FontSegment> = Vec::new();
         for c in text.chars() {
             let Some(resolved) = self.typeface_for_char_in_families(&families, c, weight, italic)
@@ -323,6 +312,19 @@ impl FontResolver {
         self.cache.borrow().chars.len()
     }
 
+    fn resolved(&self, typeface: Typeface, weight: u16, italic: bool) -> ResolvedTypeface {
+        let key = (typeface.unique_id(), weight);
+        // Share an instance across codepoints so segmentation remains by face,
+        // not one freshly cloned variable typeface per character.
+        let mut cache = self.cache.borrow_mut();
+        let typeface = cache
+            .weights
+            .entry(key)
+            .or_insert_with(|| crate::font_variations::typeface_at_weight(typeface, weight))
+            .clone();
+        resolved(typeface, weight, italic)
+    }
+
     fn resolve_uncached(
         &self,
         families: &[String],
@@ -342,7 +344,7 @@ impl FontResolver {
                 if let Some(typeface) =
                     family_typeface_covering(imported, &imported_names, family, style, c)
                 {
-                    return Some(resolved(typeface, weight, italic));
+                    return Some(self.resolved(typeface, weight, italic));
                 }
             }
             if let Some(typeface) = family_typeface_covering(
@@ -352,13 +354,13 @@ impl FontResolver {
                 style,
                 c,
             ) {
-                return Some(resolved(typeface, weight, italic));
+                return Some(self.resolved(typeface, weight, italic));
             }
             if let Some(bundled) = &*bundled_mgr {
                 if let Some(typeface) =
                     family_typeface_covering(bundled, &bundled_names, family, style, c)
                 {
-                    return Some(resolved(typeface, weight, italic));
+                    return Some(self.resolved(typeface, weight, italic));
                 }
             }
         }
@@ -368,7 +370,7 @@ impl FontResolver {
             .filter(|typeface| covers(typeface, c))
             .cloned()
         {
-            return Some(resolved(typeface, weight, italic));
+            return Some(self.resolved(typeface, weight, italic));
         }
         if let Some(typeface) =
             self.system_mgr
@@ -385,7 +387,7 @@ impl FontResolver {
                 .match_family_style(&family, style)
                 .filter(|candidate| covers(candidate, c))
                 .unwrap_or(typeface);
-            return Some(resolved(styled, weight, italic));
+            return Some(self.resolved(styled, weight, italic));
         }
         // Last resort: scan every imported family for glyph coverage. On
         // platforms without a character-aware system font manager (OHOS ships
@@ -398,7 +400,7 @@ impl FontResolver {
                 if let Some(typeface) =
                     family_typeface_covering(imported, &imported_names, family, style, c)
                 {
-                    return Some(resolved(typeface, weight, italic));
+                    return Some(self.resolved(typeface, weight, italic));
                 }
             }
         }

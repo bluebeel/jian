@@ -19,8 +19,15 @@ use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
+mod compact;
+pub use compact::{
+    write_document, write_document_with_extension as write_document_compact_with_extension,
+};
+mod identity;
+mod object;
 mod order;
-pub use order::{visit_legacy_node_roots, SaveImageOrder};
+pub use object::write_object_compact_with_extension;
+pub use order::{visit_legacy_node_roots, visit_node_image_sources, SaveImageOrder};
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 struct AllocationKey {
@@ -46,41 +53,51 @@ impl SaveCollector {
         if source_text.starts_with(REF_PREFIX) {
             return None;
         }
-        self.referenced_paint_ids
-            .insert(crate::node::image_src::paint_image_id(source_text));
         if source_text.len() < MIN_EXTERNALIZE_LEN || !source_text.starts_with("data:") {
+            self.referenced_paint_ids
+                .insert(crate::node::image_src::paint_image_id(source_text));
             return None;
         }
-
         let payload = source.as_arc();
         let allocation = AllocationKey {
             address: Arc::as_ptr(&payload) as *const () as usize,
             len: payload.len(),
         };
-        if let Some(id) = self.allocations.get(&allocation) {
-            return Some(format!("{REF_PREFIX}{id}"));
+        // The prepass already recorded the paint ID and pins the payload in
+        // this save's table. Repeated references need no digest or formatting.
+        if let Some(reference) = self.allocations.get(&allocation) {
+            return Some(reference.clone());
         }
-
-        let base = format!("{:016x}", fnv1a64(source_text.as_bytes()));
+        let digest = identity::digest(&payload, allocation);
+        self.referenced_paint_ids.insert(digest.paint);
+        let base = format!("{:016x}", digest.full);
         let mut id = base.clone();
         let mut probe = 1_u32;
-        loop {
+        let memoize = loop {
             match self.image_indices.get(&id).copied() {
                 None => {
                     let index = self.images.len();
                     self.images.push((id.clone(), payload));
                     self.image_indices.insert(id.clone(), index);
-                    break;
+                    break true;
                 }
-                Some(index) if self.images[index].1.as_ref() == source_text => break,
+                Some(index) if self.images[index].1.as_ref() == source_text => {
+                    break Arc::ptr_eq(&self.images[index].1, &payload)
+                }
                 Some(_) => {
                     probe += 1;
                     id = format!("{base}-{probe}");
                 }
             }
+        };
+        let reference = format!("{REF_PREFIX}{id}");
+        // Only a payload pinned in this save's image table can use an address
+        // memo. Distinct equal temporary Arcs must not be retained unboundedly
+        // or have a recycled address interpreted as another image's reference.
+        if memoize {
+            self.allocations.insert(allocation, reference.clone());
         }
-        self.allocations.insert(allocation, id.clone());
-        Some(format!("{REF_PREFIX}{id}"))
+        Some(reference)
     }
 }
 
@@ -149,6 +166,20 @@ pub fn with_save_scope<R>(
     f: impl FnOnce(&SaveTables<'_>) -> R,
 ) -> R {
     with_collector(SaveCollector::default(), thumbnails, f)
+}
+
+/// Inspect canonical values without changing an enclosing save collector.
+/// The previous scope is restored on normal return and unwind.
+pub fn without_save_scope<R>(f: impl FnOnce() -> R) -> R {
+    let previous = ACTIVE_COLLECTOR.with(|active| active.borrow_mut().take());
+    struct Restore(Option<Rc<RefCell<SaveCollector>>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            ACTIVE_COLLECTOR.with(|active| *active.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(previous);
+    f()
 }
 
 fn with_collector<R>(
@@ -381,6 +412,8 @@ mod tests {
 
     fn image_node(id: &str, source: ImageSrc) -> PenNode {
         PenNode::Image(ImageNode {
+            nearest_sampling: None,
+            geometry: None,
             base: PenNodeBase {
                 id: id.to_owned(),
                 ..Default::default()
@@ -467,6 +500,57 @@ mod tests {
         let json = serde_json::to_string(&source).expect("ordinary ImageSrc");
         assert!(json.contains("data:image/png"));
         assert!(!json.contains("op-image:"));
+    }
+
+    #[test]
+    fn image_fill_preview_externalizes_and_interns_as_a_full_source() {
+        let original = large_source("original");
+        let preview = ImageSrc::from(format!("data:image/png;base64,{}", "B".repeat(143 * 1024)));
+        let mut raw = serde_json::json!({"version": "1.0.0", "children": [{
+            "type": "rectangle", "id": "preview", "fill": [
+                {"type":"image", "url":original.as_str(), "thumbnailUrl":preview.as_str(), "nearestSampling":true},
+                {"type":"image", "url":original.as_str(), "thumbnailUrl":preview.as_str()}
+            ]
+        }]});
+        let doc: PenDocument = serde_json::from_value(raw.clone()).unwrap();
+        super::super::externalize_images(&mut raw);
+        assert!(raw["children"][0]["fill"][0]["thumbnailUrl"]
+            .as_str()
+            .unwrap()
+            .starts_with("op-image:"));
+        let mut encoded = Vec::new();
+        write_document_with_extension(
+            &mut encoded,
+            &doc,
+            &image_thumbs::capture_snapshot(),
+            "testExtension",
+            &(),
+        )
+        .unwrap();
+        let encoded = String::from_utf8(encoded).unwrap();
+        let wire: Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            wire["images"], raw["images"],
+            "streaming and Value walkers visit both sources"
+        );
+        assert_eq!(wire["images"].as_object().unwrap().len(), 2);
+        let loaded = crate::compat::load_str(&encoded).unwrap().value;
+        let PenNode::Rectangle(rectangle) = &loaded.children[0] else {
+            panic!("rectangle")
+        };
+        let fills = rectangle.container.fill.as_ref().unwrap();
+        let (crate::style::PenFill::Image(first), crate::style::PenFill::Image(second)) =
+            (&fills[0], &fills[1])
+        else {
+            panic!("images")
+        };
+        assert_eq!(first.url, original);
+        assert_eq!(first.thumbnail_url.as_ref(), Some(&preview));
+        assert!(Arc::ptr_eq(
+            &first.thumbnail_url.as_ref().unwrap().as_arc(),
+            &second.thumbnail_url.as_ref().unwrap().as_arc()
+        ));
+        assert_eq!(first.nearest_sampling, Some(true));
     }
 
     #[test]

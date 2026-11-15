@@ -57,6 +57,13 @@ pub fn visit_legacy_node_roots<'a>(
     }
 }
 
+/// Visit exactly this node's typed image sources in canonical save order,
+/// including styled runs and widget states, without visiting descendants.
+#[doc(hidden)]
+pub fn visit_node_image_sources(node: &PenNode, visit: &mut dyn FnMut(&crate::node::ImageSrc)) {
+    let _ = visit_own_sources(node, visit);
+}
+
 fn visit_own_sources<'a>(
     node: &'a PenNode,
     visit: &mut dyn FnMut(&crate::node::ImageSrc),
@@ -70,7 +77,7 @@ fn visit_own_sources<'a>(
     macro_rules! widget_style {
         ($node:expr) => {{
             style!($node);
-            visit_states($node.states.as_ref(), visit);
+            visit_states($node.states.as_deref(), visit);
         }};
     }
 
@@ -107,6 +114,11 @@ fn visit_own_sources<'a>(
             None
         }
         PenNode::Text(node) => {
+            if let crate::node::text::TextContent::Styled(segments) = &node.content {
+                for segment in segments {
+                    visit_fills(segment.fill_paints.as_deref(), visit);
+                }
+            }
             visit_fills(node.fill.as_deref(), visit);
             None
         }
@@ -166,6 +178,9 @@ fn visit_fills(fills: Option<&[PenFill]>, visit: &mut dyn FnMut(&crate::node::Im
     for fill in fills.into_iter().flatten() {
         if let PenFill::Image(image) = fill {
             visit(&image.url);
+            if let Some(thumbnail) = &image.thumbnail_url {
+                visit(thumbnail);
+            }
         }
     }
 }

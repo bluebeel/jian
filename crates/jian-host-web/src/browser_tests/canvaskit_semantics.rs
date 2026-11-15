@@ -209,6 +209,7 @@ async fn cjk_coverage_and_rich_render_share_measurement_styles() {
 
     let measure_runs = [
         StyledRun {
+        font_features: None,
             text: "Jian ",
             font_family: Some("Roboto"),
             font_size: 18.0,
@@ -217,6 +218,7 @@ async fn cjk_coverage_and_rich_render_share_measurement_styles() {
             letter_spacing: 2.0,
         },
         StyledRun {
+        font_features: None,
             text: "你好 styled wrapping text",
             font_family: Some("Roboto"),
             font_size: 28.0,
@@ -257,6 +259,7 @@ async fn auto_and_fixed_width_height_render_with_their_unwrapped_measurement() {
         .await
         .unwrap();
     let runs = [StyledRun {
+        font_features: None,
         text: "Jian unwrapped agreement text 你好",
         font_family: Some("Roboto"),
         font_size: 24.0,

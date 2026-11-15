@@ -54,6 +54,10 @@ pub struct PathNode {
     pub icon_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub d: Option<String>,
+    /// Original local coordinate box of d. None retains legacy tight fitting.
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "viewBox")]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub view_box: Option<Box<[f64; 4]>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchors: Option<Vec<PenPathAnchor>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -86,13 +90,13 @@ pub struct PathNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bindings: Option<crate::events::Bindings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub events: Option<crate::events::EventHandlers>,
+    pub events: Option<Box<crate::events::EventHandlers>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lifecycle: Option<crate::lifecycle::NodeLifecycleHooks>,
+    pub lifecycle: Option<Box<crate::lifecycle::NodeLifecycleHooks>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub semantics: Option<crate::semantics::SemanticsMeta>,
+    pub semantics: Option<Box<crate::semantics::SemanticsMeta>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gestures: Option<crate::gestures::GestureOverrides>,
+    pub gestures: Option<Box<crate::gestures::GestureOverrides>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<crate::navigation::NavigationRoute>,
 }

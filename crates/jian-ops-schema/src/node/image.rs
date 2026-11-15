@@ -17,11 +17,17 @@ pub enum ImageFitMode {
     Tile,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct ImageNode {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature="export-ts",ts(optional=nullable))]
+    pub nearest_sampling: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature="export-ts",ts(optional=nullable))]
+    pub geometry: Option<Box<crate::style::ImageFieldGeometry>>,
     #[serde(flatten)]
     pub base: PenNodeBase,
     // Image source — an `Arc`-shared string (`data:` URL or path). See
@@ -69,13 +75,13 @@ pub struct ImageNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bindings: Option<crate::events::Bindings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub events: Option<crate::events::EventHandlers>,
+    pub events: Option<Box<crate::events::EventHandlers>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lifecycle: Option<crate::lifecycle::NodeLifecycleHooks>,
+    pub lifecycle: Option<Box<crate::lifecycle::NodeLifecycleHooks>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub semantics: Option<crate::semantics::SemanticsMeta>,
+    pub semantics: Option<Box<crate::semantics::SemanticsMeta>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gestures: Option<crate::gestures::GestureOverrides>,
+    pub gestures: Option<Box<crate::gestures::GestureOverrides>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<crate::navigation::NavigationRoute>,
 }

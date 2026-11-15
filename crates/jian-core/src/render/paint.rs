@@ -59,6 +59,9 @@ pub enum PathCommand {
 
 #[derive(Debug, Clone)]
 pub struct ShadowSpec {
+    pub blur_kernel: super::shadow::ShadowBlurKernel,
+    pub float_color: Option<[f32; 4]>,
+    pub silhouette: Option<super::shadow::RoundedShadowSilhouette>,
     pub color: Color,
     pub dx: f32,
     pub dy: f32,

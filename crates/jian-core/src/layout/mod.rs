@@ -13,6 +13,7 @@
 //! (`Auto` / `FixedWidth` / `FixedWidthHeight`); the budget-resolution
 //! rules live in the private `measure_text_for_taffy` callback.
 
+mod build;
 pub mod constraints;
 mod fill_text;
 pub mod measure;
@@ -86,6 +87,7 @@ pub struct OwnedRun {
     pub font_weight: u16,
     pub font_style: FontStyleKind,
     pub letter_spacing: f32,
+    pub font_features: std::collections::BTreeMap<String, u32>,
 }
 
 const INPUT_PAD_X: f32 = 8.0;
@@ -100,6 +102,7 @@ impl OwnedRun {
             font_weight: self.font_weight,
             font_style: self.font_style,
             letter_spacing: self.letter_spacing,
+            font_features: Some(&self.font_features),
         }
     }
 }
@@ -208,111 +211,6 @@ impl LayoutEngine {
     /// Build a taffy tree mirroring the NodeTree. Returns the root NodeIds.
     pub fn build(&mut self, doc_tree: &NodeTree) -> CoreResult<Vec<NodeId>> {
         self.build_with_mode(doc_tree, false)
-    }
-
-    fn build_with_mode(
-        &mut self,
-        doc_tree: &NodeTree,
-        responsive: bool,
-    ) -> CoreResult<Vec<NodeId>> {
-        // A real taffy compute supersedes any preload snapshot —
-        // post-compute `node_rect` reads must come from taffy, not
-        // stale AOT geometry. Plan 19 D1.
-        self.preload = SecondaryMap::new();
-        self.tree = TaffyTree::new();
-        self.map = SecondaryMap::new();
-        self.parent = SecondaryMap::new();
-        self.reference = None;
-        self.constraint_lints.clear();
-        self.node_order.clear();
-        self.overrides = SecondaryMap::new();
-        self.compute_count = 0;
-        self.bound_hit = false;
-        self.root_owner = SecondaryMap::new();
-        self.root_origins = SecondaryMap::new();
-        self.base_styles = SecondaryMap::new();
-        self.origin_normalized.clear();
-        self.node_order = doc_tree.keys_top_down();
-        for &root in &doc_tree.roots {
-            if let Some(origin) = doc_tree
-                .nodes
-                .get(root)
-                .and_then(|node| resolve::explicit_position(&node.schema))
-            {
-                self.root_origins.insert(root, origin);
-            }
-            let mut stack = vec![root];
-            while let Some(key) = stack.pop() {
-                // First owner wins; a duplicate cross-root child or cycle
-                // is malformed input — skip instead of looping/overwriting.
-                if self.root_owner.insert(key, root).is_some() {
-                    debug_assert!(false, "node reachable from multiple roots or cycle");
-                    continue;
-                }
-                stack.extend(doc_tree.nodes[key].children.iter().rev().copied());
-            }
-        }
-
-        // Pass 1: create a taffy node for each doc node. `node_to_style`
-        // handles both containers (Frame/Group/Rectangle) and leaves
-        // (Text / IconFont / Image / …) so leaf sizes propagate into
-        // flex measurements.
-        for (key, data) in doc_tree.nodes.iter() {
-            let parent = data.parent.map(|p| &doc_tree.nodes[p].schema);
-            let mut style = if responsive {
-                resolve::node_to_style_responsive(&data.schema, &mut self.constraint_lints)
-            } else {
-                fill_text::legacy_style(&data.schema, parent)
-            };
-            // Direction-aware flex_shrink: a child whose MAIN-AXIS size is a
-            // fixed Number must not be shrunk below it. `node_to_style` only
-            // pins fully-fixed squares (both axes Number); here, with the parent
-            // in hand, we also pin a `width:200, height:fit_content` card in a
-            // horizontal scroll row so it keeps its width — its title doesn't
-            // wrap and sibling cards stay equal-height (otherwise an overflowing
-            // row squeezes the cards into ragged, uneven heights).
-            if let Some(p) = data.parent {
-                if resolve::node_is_stack_container(&doc_tree.nodes[p].schema) {
-                    // `layout: "none"` parent: children share one grid cell
-                    // and overlap. The flex hints below all assume a flow
-                    // line and would fight the stack (`main_axis` has no
-                    // meaning when every child starts at the same origin).
-                    resolve::apply_stack_child(&mut style);
-                } else {
-                    let parent_horizontal = resolve::node_is_horizontal(&doc_tree.nodes[p].schema);
-                    if resolve::main_axis_is_fixed_number(&data.schema, parent_horizontal) {
-                        style.flex_shrink = 0.0;
-                    }
-                    // A fill-height child in a row stretches to the row's height
-                    // (so a space_between sidebar's footer reaches the bottom)
-                    // instead of collapsing on an indefinite-height parent.
-                    resolve::apply_fill_container_axes(&mut style, &data.schema, parent_horizontal);
-                }
-            }
-            self.base_styles.insert(key, style.clone());
-            let ctx = text_measure_for(&data.schema);
-            let id = self
-                .tree
-                .new_leaf_with_context(style, ctx)
-                .map_err(|e| CoreError::Layout(e.to_string()))?;
-            self.map.insert(key, id);
-            if let Some(p) = data.parent {
-                self.parent.insert(key, p);
-            }
-        }
-
-        // Pass 2: wire parent/child relationships.
-        for (key, data) in doc_tree.nodes.iter() {
-            if !data.children.is_empty() {
-                let parent = self.map[key];
-                let child_ids: Vec<NodeId> = data.children.iter().map(|k| self.map[*k]).collect();
-                self.tree
-                    .set_children(parent, &child_ids)
-                    .map_err(|e| CoreError::Layout(e.to_string()))?;
-            }
-        }
-
-        Ok(doc_tree.roots.iter().map(|k| self.map[*k]).collect())
     }
 
     /// Build layout plus the authored reference geometry used by responsive constraints.
@@ -519,6 +417,7 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
                 font_weight: 400,
                 font_style: FontStyleKind::Normal,
                 letter_spacing: 0.0,
+                font_features: Default::default(),
             }],
             line_height: 0.0,
             growth: TextGrowth::Auto,
@@ -539,6 +438,7 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
                 font_weight: wm::WIDGET_LABEL_FONT_WEIGHT,
                 font_style: FontStyleKind::Normal,
                 letter_spacing: 0.0,
+                font_features: Default::default(),
             }],
             // The adjacent label painter uses a 14px one-line box rather
             // than input/body text's 1.3x default leading.
@@ -600,6 +500,16 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
     let node_style = resolve_style(t.font_style.as_ref());
     let node_family = t.font_family.clone();
     let node_letter_spacing = t.letter_spacing.map(|v| v as f32).unwrap_or(0.0);
+    let mut node_features = t.font_features.clone().unwrap_or_default();
+    if t.font_kerning == Some(false) {
+        node_features.insert("kern".into(), 0);
+    } else if t.font_kerning == Some(true) {
+        node_features.entry("kern".into()).or_insert(1);
+    }
+    if t.font_kerning.is_some() {
+        node_features.entry("liga".into()).or_insert(0);
+        node_features.entry("calt".into()).or_insert(0);
+    }
 
     let runs: Vec<OwnedRun> = match &t.content {
         TextContent::Plain(s) => {
@@ -613,6 +523,7 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
                 font_weight: node_weight,
                 font_style: node_style,
                 letter_spacing: node_letter_spacing,
+                font_features: node_features.clone(),
             }]
         }
         TextContent::Styled(segs) => {
@@ -627,7 +538,7 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
                 .map(|s| OwnedRun {
                     text: s.text.clone(),
                     font_family: s.font_family.clone().or_else(|| node_family.clone()),
-                    font_size: s.font_size.unwrap_or(node_size),
+                    font_size: s.font_size.map(|value| value as f32).unwrap_or(node_size),
                     font_weight: s.font_weight.map(|n| n as u16).unwrap_or(node_weight),
                     font_style: match s.font_style {
                         Some(jian_ops_schema::style::FontStyleKind::Italic) => {
@@ -639,6 +550,7 @@ fn text_measure_for(n: &jian_ops_schema::node::PenNode) -> Option<TextMeasure> {
                         None => node_style,
                     },
                     letter_spacing: node_letter_spacing,
+                    font_features: node_features.clone(),
                 })
                 .collect();
             if resolved.is_empty() {

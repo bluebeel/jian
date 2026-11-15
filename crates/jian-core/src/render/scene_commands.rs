@@ -97,7 +97,7 @@ fn walk(
         commands.push(ScenePaintCommand::PushTransform(transform));
     }
 
-    let effects = layer_effects(&json);
+    let effects = layer_effects(&json, bounds);
     let mut bounds_visited = HashSet::with_capacity(doc.tree.nodes.len());
     let content_bounds = subtree_content_bounds(
         doc,
@@ -243,7 +243,25 @@ fn clip_content(json: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn layer_effects(json: &Value) -> Vec<LayerEffect> {
+fn rounded_shadow_silhouette(
+    node: &Value,
+    bounds: Rect,
+    effect: &Value,
+) -> Option<super::shadow::RoundedShadowSilhouette> {
+    if super::shadow::kernel_from_json(effect) != super::shadow::ShadowBlurKernel::Triangular
+        || !matches!(
+            node.get("type").and_then(Value::as_str),
+            Some("frame" | "rectangle")
+        )
+    {
+        return None;
+    }
+    let radii = super::scene::corner_radii(node).unwrap_or_else(super::BorderRadii::zero);
+    (radii.tl == radii.tr && radii.tl == radii.br && radii.tl == radii.bl)
+        .then_some(super::shadow::RoundedShadowSilhouette { bounds, radii })
+}
+
+fn layer_effects(json: &Value, bounds: Rect) -> Vec<LayerEffect> {
     let Some(effects) = json.get("effects").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -260,16 +278,20 @@ fn layer_effects(json: &Value) -> Vec<LayerEffect> {
                     .and_then(Value::as_bool)
                     .unwrap_or(false) =>
             {
+                let (color, float_color) = effect
+                    .get("color")
+                    .and_then(Value::as_str)
+                    .and_then(super::shadow::parse_shadow_color)
+                    .unwrap_or((Color::rgba(0, 0, 0, 128), None));
                 Some(LayerEffect::Shadow(ShadowSpec {
+                    blur_kernel: super::shadow::kernel_from_json(effect),
+                    float_color,
+                    silhouette: rounded_shadow_silhouette(json, bounds, effect),
                     dx: effect.get("offsetX").and_then(Value::as_f64).unwrap_or(0.0) as f32,
                     dy: effect.get("offsetY").and_then(Value::as_f64).unwrap_or(0.0) as f32,
                     blur: effect.get("blur").and_then(Value::as_f64).unwrap_or(0.0) as f32,
                     spread: effect.get("spread").and_then(Value::as_f64).unwrap_or(0.0) as f32,
-                    color: effect
-                        .get("color")
-                        .and_then(Value::as_str)
-                        .and_then(Color::from_hex)
-                        .unwrap_or(Color::rgba(0, 0, 0, 128)),
+                    color,
                 }))
             }
             _ => None,
@@ -337,7 +359,7 @@ fn painted_node_bounds(
     bounds = overrides.apply_to_rect(bounds);
 
     let content = subtree_content_bounds(doc, layout, state, widgets, key, bounds, &json, visited);
-    let effects = layer_effects(&json);
+    let effects = layer_effects(&json, bounds);
     let painted = nested_effect_bounds(content, &effects)
         .first()
         .copied()

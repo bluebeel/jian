@@ -40,11 +40,14 @@
 use serde_json::{Map, Value};
 
 mod save;
+mod styled;
 
 pub(crate) use save::scoped_reference;
 pub use save::{
-    visit_legacy_node_roots, with_save_scope, write_document_with_extension, SaveImageOrder,
-    SaveImageTable, SaveTableWriteStats, SaveTables,
+    visit_legacy_node_roots, visit_node_image_sources, with_save_scope, without_save_scope,
+    write_document, write_document_compact_with_extension, write_document_with_extension,
+    write_object_compact_with_extension, SaveImageOrder, SaveImageTable, SaveTableWriteStats,
+    SaveTables,
 };
 
 /// Key of the top-level table in the serialized document.
@@ -68,7 +71,7 @@ pub fn visit_image_src_strings_mut(root: &mut Value, f: &mut impl FnMut(&mut Str
 }
 
 /// Visit every image-source string slot in `root`'s NODE TREE:
-/// `ImageNode.src` and image-fill `url`s — direct `fill` arrays,
+/// `ImageNode.src` and image-fill `url`/`thumbnailUrl`s — direct `fill` arrays,
 /// `stroke.fill`, and widget-state override (`states.*`) fills —
 /// across `children` / `pages[].children` and nested `children`.
 ///
@@ -100,10 +103,12 @@ fn visit_image_strings_mut(root: &mut Value, f: &mut impl FnMut(&mut String)) {
             continue;
         };
         let image_node = is_image_typed(node);
+        let text_node = node.get("type").and_then(Value::as_str) == Some("text");
         for (k, v) in node.iter_mut() {
             match (k.as_str(), v) {
                 ("src", Value::String(s)) if image_node => f(s),
                 ("fill", fill) => visit_fill_array_mut(fill, f),
+                ("content", content) if text_node => styled::visit_mut(content, f),
                 ("stroke", stroke) => visit_stroke_mut(stroke, f),
                 ("states", Value::Object(states)) => {
                     for override_value in states.values_mut() {
@@ -126,7 +131,7 @@ fn visit_image_strings_mut(root: &mut Value, f: &mut impl FnMut(&mut String)) {
     }
 }
 
-/// Visit the `url` of every image fill in a `fill` array.
+/// Visit both typed image sources of every image fill in a `fill` array.
 fn visit_fill_array_mut(fill: &mut Value, f: &mut impl FnMut(&mut String)) {
     let Value::Array(items) = fill else {
         return;
@@ -138,8 +143,10 @@ fn visit_fill_array_mut(fill: &mut Value, f: &mut impl FnMut(&mut String)) {
         if !is_image_typed(item) {
             continue;
         }
-        if let Some(Value::String(url)) = item.get_mut("url") {
-            f(url);
+        for key in ["url", "thumbnailUrl"] {
+            if let Some(Value::String(url)) = item.get_mut(key) {
+                f(url);
+            }
         }
     }
 }
@@ -310,10 +317,12 @@ fn visit_image_strings_ref(root: &Value, f: &mut impl FnMut(&str)) {
             continue;
         };
         let image_node = is_image_typed(node);
+        let text_node = node.get("type").and_then(Value::as_str) == Some("text");
         for (k, v) in node {
             match (k.as_str(), v) {
                 ("src", Value::String(s)) if image_node => f(s),
                 ("fill", fill) => visit_fill_array_ref(fill, f),
+                ("content", content) if text_node => styled::visit_ref(content, f),
                 ("stroke", stroke) => visit_stroke_ref(stroke, f),
                 ("states", Value::Object(states)) => {
                     for override_value in states.values() {
@@ -347,8 +356,10 @@ fn visit_fill_array_ref(fill: &Value, f: &mut impl FnMut(&str)) {
         if !is_image_typed(item) {
             continue;
         }
-        if let Some(Value::String(url)) = item.get("url") {
-            f(url);
+        for key in ["url", "thumbnailUrl"] {
+            if let Some(Value::String(url)) = item.get(key) {
+                f(url);
+            }
         }
     }
 }

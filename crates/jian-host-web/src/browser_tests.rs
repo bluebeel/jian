@@ -117,6 +117,7 @@ async fn canvas_kit_measure_matches_render_and_drives_runtime_wrap_height() {
 
     let measure = backend.measure_backend();
     let runs = [StyledRun {
+        font_features: None,
         text: "Jian 你好",
         font_family: Some("Roboto"),
         font_size: 24.0,

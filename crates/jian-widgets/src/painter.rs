@@ -1,153 +1,18 @@
 //! Platform-neutral painter contract for immediate-mode widgets.
 
 use crate::geometry::{fold_alpha, Color, Point2D, Rect};
-use jian_core::render::{TextAlign, TextRun};
-
-/// Text layout passed through to a backend-owned text renderer.
-#[derive(Debug, Clone)]
-pub struct TextLayout {
-    runs: Vec<TextRun>,
-    italic: bool,
-}
-
-/// Inputs used to locate the first alphabetic baseline inside a text line.
-///
-/// `line_height` is the authored multiplier (`0` means backend default).
-/// Including the actual line text lets a backend resolve the same fallback
-/// face used for CJK/emoji paint instead of sampling an unrelated Latin glyph.
-#[derive(Debug, Clone, Copy)]
-pub struct TextBaselineRequest<'a> {
-    pub text: &'a str,
-    pub font_family: &'a str,
-    pub font_size: f32,
-    pub font_weight: u16,
-    pub italic: bool,
-    pub line_height: f32,
-}
-
-/// Raster image placement mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ImageDrawMode {
-    #[default]
-    Fill,
-    Fit,
-    Crop,
-    Tile,
-    Stretch,
-}
-
-/// Compositing mode applied to an isolated paint layer or raster image.
-///
-/// `Normal` preserves the historical source-over behaviour. The remaining
-/// variants mirror the blend modes supported by the canonical `.op` schema
-/// and map directly onto Skia / CanvasKit paint modes in host backends.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ImageBlendMode {
-    #[default]
-    Normal,
-    Darken,
-    Multiply,
-    Screen,
-    Overlay,
-    Lighten,
-    Difference,
-    Hue,
-    Saturation,
-    Color,
-    Luminosity,
-    SoftLight,
-    ColorDodge,
-    ColorBurn,
-    HardLight,
-    Exclusion,
-}
-
-/// Per-image adjustment values in the UI slider range `[-100, 100]`.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct ImageAdjustments {
-    pub exposure: f32,
-    pub contrast: f32,
-    pub saturation: f32,
-    pub temperature: f32,
-    pub tint: f32,
-    pub highlights: f32,
-    pub shadows: f32,
-}
-
-impl ImageAdjustments {
-    pub fn is_neutral(self) -> bool {
-        self.exposure == 0.0
-            && self.contrast == 0.0
-            && self.saturation == 0.0
-            && self.temperature == 0.0
-            && self.tint == 0.0
-            && self.highlights == 0.0
-            && self.shadows == 0.0
-    }
-}
-
-impl TextLayout {
-    pub fn single_run(
-        content: &str,
-        font_family: &str,
-        font_size: f32,
-        color: jian_core::scene::Color,
-        origin: Point2D,
-    ) -> Self {
-        let run = TextRun {
-            content: content.to_string(),
-            font_family: font_family.to_string(),
-            font_size,
-            font_weight: 400,
-            color,
-            origin: jian_core::geometry::Point::new(origin.x, origin.y),
-            max_width: 0.0,
-            align: TextAlign::Start,
-            line_height: 0.0,
-        };
-        Self {
-            runs: vec![run],
-            italic: false,
-        }
-    }
-
-    pub fn runs(&self) -> &[TextRun] {
-        &self.runs
-    }
-
-    pub fn with_font_weight(mut self, weight: u16) -> Self {
-        for r in &mut self.runs {
-            r.font_weight = weight;
-        }
-        self
-    }
-
-    pub fn with_italic(mut self, italic: bool) -> Self {
-        self.italic = italic;
-        self
-    }
-
-    pub fn italic(&self) -> bool {
-        self.italic
-    }
-
-    pub fn translated(&self, offset: Point2D) -> Self {
-        let runs = self
-            .runs
-            .iter()
-            .map(|r| {
-                let mut r2 = r.clone();
-                r2.origin =
-                    jian_core::geometry::Point::new(r.origin.x + offset.x, r.origin.y + offset.y);
-                r2
-            })
-            .collect();
-        Self {
-            runs,
-            italic: self.italic,
-        }
-    }
-}
+mod image_options;
+mod shadow_options;
+mod text_decoration;
+mod text_layout;
+mod text_mask;
+pub use image_options::{
+    ImageAdjustments, ImageBlendMode, ImageDrawMode, ImagePaintOptions, ImagePaintThumbnail,
+};
+pub use shadow_options::{RoundRectShadowOptions, ShadowBlurKernel};
+pub use text_decoration::TextDecorationRequest;
+pub use text_layout::{TextBaselineRequest, TextLayout};
+pub use text_mask::{TextMaskAction, TextMaskResult};
 
 /// Backend abstraction used by cross-platform widgets.
 pub trait Painter {
@@ -157,7 +22,19 @@ pub trait Painter {
     fn fill_rect(&mut self, rect: Rect, color: Color);
     fn stroke_rect(&mut self, rect: Rect, color: Color, width: f32);
     fn draw_text(&mut self, layout: &TextLayout, origin: Point2D);
+    /// Return true after painting metric-based decorations; false lets the
+    /// caller retain its portable legacy fallback.
+    fn draw_text_decoration(&mut self, _request: &TextDecorationRequest<'_>) -> bool {
+        false
+    }
     fn clip_rect(&mut self, rect: Rect);
+
+    /// Optionally push a shadow-only exclusion; the caller promises a later
+    /// opaque Normal fill and restores once after its outer shadows. True
+    /// means one saved clip was pushed; false leaves all state unchanged.
+    fn push_opaque_shadow_exclusion(&mut self, _rect: Rect, _max_radius: f32) -> bool {
+        false
+    }
 
     fn clip_round_rect(&mut self, rect: Rect, radius: f32) {
         let _ = radius;
@@ -356,9 +233,37 @@ pub trait Painter {
         );
     }
 
+    /// Map a canvas-space shadow displacement into the current shape space.
+    /// Transform-aware backends keep effect offsets independent of node rotation
+    /// and reflection; simple painters retain their existing coordinate space.
+    fn shadow_offset_in_local_space(&self, offset: Point2D) -> Point2D {
+        offset
+    }
+
+    /// Returns false when the host cannot paint this profile. Callers can
+    /// retain their legacy outer-shadow fallback without claiming support.
+    fn fill_round_rect_shadow(
+        &mut self,
+        _rect: Rect,
+        _radius: f32,
+        _shadow: &RoundRectShadowOptions,
+    ) -> bool {
+        false
+    }
+
     fn fill_drop_shadow(&mut self, rect: Rect, radius: f32, blur: f32, color: Color) {
         let _ = blur;
         self.fill_round_rect(rect, radius, color);
+    }
+
+    fn fill_round_rect_shadow_per_corner(
+        &mut self,
+        rect: Rect,
+        radii: [f32; 4],
+        shadow: &RoundRectShadowOptions,
+    ) -> bool {
+        radii.windows(2).all(|pair| pair[0] == pair[1])
+            && self.fill_round_rect_shadow(rect, radii[0], shadow)
     }
 
     /// Begin a Gaussian-blur layer: subsequent draws are captured into
@@ -394,6 +299,46 @@ pub trait Painter {
     fn push_mask_source_layer(&mut self, luminance: bool) {
         let _ = luminance;
         self.save();
+    }
+
+    /// Explicit SVG mask color space. Existing/custom implementations keep
+    /// their legacy sRGB behavior unless they override this additive hook.
+    fn push_mask_source_layer_with_color_space(&mut self, luminance: bool, linear_rgb: bool) {
+        let _ = linear_rgb;
+        self.push_mask_source_layer(luminance);
+    }
+
+    /// Paint fields may extend beyond their original coordinate rectangle,
+    /// as required for center/outside strokes. Native/Web implement the scope.
+    fn supports_stroke_paint_fields(&self) -> bool {
+        false
+    }
+    fn push_paint_space(&mut self, rect: crate::Rect) {
+        let _ = rect;
+        self.save();
+    }
+    /// Finite local coverage for a paint field, including text overhang. None
+    /// retains the compatibility painter without introducing a new clip.
+    fn paint_field_bounds(&mut self) -> Option<Rect> {
+        None
+    }
+    /// One lexical prepared glyph/decor mask. Replay refusal draws nothing;
+    /// callers must discard or replay before leaving the owning paint scope.
+    fn text_mask_capture(&mut self, _action: TextMaskAction) -> TextMaskResult {
+        TextMaskResult::Unavailable
+    }
+    fn pop_paint_space(&mut self) {
+        self.restore();
+    }
+    /// Exact curve stroke. False retains legacy custom-backend compatibility.
+    fn stroke_geometry(
+        &mut self,
+        geometry: crate::StrokeGeometry<'_>,
+        options: &crate::StrokeMaskOptions<'_>,
+        color: crate::Color,
+    ) -> bool {
+        let _ = (geometry, options, color);
+        false
     }
 
     /// Begin an isolated compositing layer. Draws until the matching
@@ -596,6 +541,30 @@ pub trait Painter {
         );
     }
 
+    /// Image source alternatives and filtering; older backends retain their
+    /// established drawing path through this default adapter.
+    fn draw_image_with_paint_options(
+        &mut self,
+        rect: Rect,
+        image_id: u64,
+        encoded: &[u8],
+        options: &ImagePaintOptions<'_>,
+    ) {
+        self.draw_image_with_options_transform_blend_and_tile_scale(
+            rect,
+            image_id,
+            encoded,
+            options.mode,
+            options.adjustments,
+            options.opacity,
+            options.corner_radius,
+            options.transform,
+            options.blend_mode,
+            options.original_size,
+            options.tile_scale,
+        );
+    }
+
     fn fill_round_rect_linear_gradient(
         &mut self,
         rect: Rect,
@@ -793,6 +762,23 @@ pub trait Painter {
         self.measure_text(text, font_size)
     }
 
+    /// Measure with the same explicit kerning used by a document text run.
+    #[allow(clippy::too_many_arguments)]
+    fn measure_text_family_kerned(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        family: &str,
+        weight: u16,
+        italic: bool,
+        _kerning: Option<bool>,
+        letter_spacing: f32,
+        _font_features: &std::collections::BTreeMap<String, u32>,
+    ) -> f32 {
+        self.measure_text_family_styled(text, font_size, family, weight, italic)
+            + text.chars().count().saturating_sub(1) as f32 * letter_spacing
+    }
+
     fn measure_text_family_styled(
         &mut self,
         text: &str,
@@ -807,48 +793,5 @@ pub trait Painter {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_support::{CapturePainter, PaintOp};
-
-    #[test]
-    fn fill_svg_path_in_rect_forwards_destination_extent_to_scalar_fallback() {
-        let mut p = CapturePainter::default();
-        let rect = Rect::xywh(2.0, 3.0, 12.0, 18.0);
-
-        p.fill_svg_path_in_rect("M0 0h1v1z", rect, Color::RED);
-
-        assert!(matches!(
-            p.ops.as_slice(),
-            [PaintOp::FillSvgPath {
-                top_left,
-                size,
-                viewbox,
-                color,
-                ..
-            }] if *top_left == rect.origin
-                && *size == rect.size.y
-                && *viewbox == 1.0
-                && *color == Color::RED
-        ));
-    }
-
-    #[test]
-    fn fill_rule_variant_defaults_to_existing_path_fill() {
-        let mut p = CapturePainter::default();
-        let rect = Rect::xywh(2.0, 3.0, 12.0, 18.0);
-
-        p.fill_svg_path_in_rect_with_fill_rule("M0 0h1v1z", rect, Color::RED, true);
-
-        assert!(matches!(p.ops.as_slice(), [PaintOp::FillSvgPath { .. }]));
-    }
-
-    #[test]
-    fn image_thumb_hook_defaults_to_a_no_op() {
-        let mut p = CapturePainter::default();
-
-        p.draw_image_thumb(Rect::xywh(0.0, 0.0, 20.0, 10.0), 7, b"jpeg");
-
-        assert!(p.ops.is_empty());
-    }
-}
+#[path = "painter/tests.rs"]
+mod tests;

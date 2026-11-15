@@ -28,7 +28,6 @@
 //! scenes too.
 
 pub use crate::layout_scene_fill::SceneFillLayer;
-use crate::scene_geometry::rect_has_extent;
 pub use crate::scene_geometry::{regular_polygon_points, stable_image_source_id};
 pub use jian_ops_schema::node::MaskType;
 use jian_widgets::{Color, ImageAdjustments, ImageBlendMode, ImageDrawMode, Point2D, Rect};
@@ -77,32 +76,18 @@ pub enum NodeKind {
     Other(String),
 }
 
-impl NodeKind {
-    /// Human-facing label for LayerPanel + PropertyPanel.
-    pub fn label(&self) -> &str {
-        match self {
-            NodeKind::Frame => "Frame",
-            NodeKind::Group => "Group",
-            NodeKind::Rect => "Rect",
-            NodeKind::Ellipse => "Ellipse",
-            NodeKind::Polygon => "Polygon",
-            NodeKind::Line => "Line",
-            NodeKind::Path => "Path",
-            NodeKind::Text => "Text",
-            NodeKind::Other(s) => s.as_str(),
-        }
-    }
-}
-
 /// Shadow effect — offset + blur + colour, doc-px units. Mirrors the
 /// TS `PenEffect` shadow variant (`offsetX` / `offsetY` / `blur` /
-/// `color` / `inner`). An outer shadow paints behind the node's fill;
+/// `spread` / `color` / `inner`). An outer shadow paints behind the node's fill;
 /// an `inner` shadow paints inset, clipped to the node silhouette.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DropShadow {
     pub offset_x: f32,
     pub offset_y: f32,
     pub blur: f32,
+    pub blur_kernel: jian_ops_schema::style::ShadowBlurKernel,
+    /// Signed silhouette expansion in document pixels before blur.
+    pub spread: f32,
     pub color: Color,
     /// `true` = inset (inner) shadow; `false` = outer drop shadow.
     pub inner: bool,
@@ -174,6 +159,8 @@ pub struct SceneShaderUniform {
 /// `opacity` folds into the paint alpha.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneShader {
+    /// Typed imported gradient definition for vector export and exact cache keys.
+    pub gradient: Option<std::sync::Arc<jian_ops_schema::style::GradientPaint>>,
     pub sksl: String,
     pub uniforms: Vec<SceneShaderUniform>,
     pub opacity: f32,
@@ -234,27 +221,7 @@ impl LayoutScene {
     /// frames. `None` when the page is empty (nothing to fit).
     pub fn content_bounds(&self) -> Option<Rect> {
         let page = self.active_page()?;
-        let mut acc: Option<Rect> = None;
-        for child in &page.children {
-            let b = child.visual_bounds();
-            if b.size.x <= 0.0 && b.size.y <= 0.0 {
-                continue;
-            }
-            acc = Some(match acc {
-                None => b,
-                Some(a) => {
-                    let min_x = a.origin.x.min(b.origin.x);
-                    let min_y = a.origin.y.min(b.origin.y);
-                    let max_x = (a.origin.x + a.size.x).max(b.origin.x + b.size.x);
-                    let max_y = (a.origin.y + a.size.y).max(b.origin.y + b.size.y);
-                    Rect {
-                        origin: Point2D::new(min_x, min_y),
-                        size: Point2D::new(max_x - min_x, max_y - min_y),
-                    }
-                }
-            });
-        }
-        acc
+        Self::content_bounds_from_rects(page.children.iter().map(SceneNode::visual_bounds))
     }
 
     /// Translate selected render subtrees in-place without rebuilding the
@@ -373,6 +340,12 @@ fn set_matching_node_stroke(nodes: &mut [SceneNode], ids: &[String], color: Colo
             // that case is left for the caller's rebuild fallback.
             if let Some(stroke) = node.stroke.as_mut() {
                 stroke.color = bake_node_alpha(color, node.opacity);
+                if let Some(paint) = node.stroke_paint.as_mut() {
+                    if let Some(layer) = std::sync::Arc::make_mut(paint).layers.first_mut() {
+                        let blend_mode = layer.blend_mode();
+                        *layer = SceneFillLayer::Solid { color, blend_mode };
+                    }
+                }
                 changed = true;
             }
         } else if set_matching_node_stroke(&mut node.children, ids, color) {
@@ -468,37 +441,9 @@ pub enum SceneTextVerticalAlign {
 /// their segment's style. A wrapped line that splits mid-segment keeps
 /// per-slice styling exact; only the WRAP POSITION itself is computed
 /// with node-level metrics (documented v1 approximation).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SceneTextRun {
-    /// Inclusive start byte offset into the node's flat `text`.
-    pub start: usize,
-    /// Exclusive end byte offset into the node's flat `text`.
-    pub end: usize,
-    /// Per-run font size in doc-px. `0.0` = inherit the node's.
-    pub font_size: f32,
-    /// Per-run CSS-style weight (100-900). `0` = inherit the node's.
-    pub font_weight: u16,
-    /// Per-run fill colour. `None` = inherit the node's resolved fill.
-    pub fill: Option<Color>,
-    /// Render this run with an italic (slanted) face.
-    pub italic: bool,
-    /// Stroke an underline beneath this run's painted slices.
-    pub underline: bool,
-    /// Stroke a strikethrough across this run's painted slices.
-    pub strikethrough: bool,
-}
-
-/// Video playback metadata carried by an image poster in the render scene.
-/// The scene paints only the poster; HTML export consumes the playback fields.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SceneVideo {
-    pub src: Arc<str>,
-    pub autoplay: bool,
-    pub r#loop: bool,
-    pub muted: bool,
-    pub hold_last_frame: bool,
-    pub click_to_replay: bool,
-}
+#[path = "layout_scene_text.rs"]
+mod text;
+pub use text::{SceneTextRun, SceneVideo};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneNode {
@@ -562,6 +507,10 @@ pub struct SceneNode {
     /// Complete canonical fill stack, ordered front-to-back. Empty means this
     /// scene came from a legacy payload and the single-fill fields apply.
     pub fill_layers: Vec<SceneFillLayer>,
+    /// Authored nonempty paint stacks with every layer disabled. These are
+    /// not legacy missing styles and must not acquire implicit black ink.
+    pub fill_disabled: bool,
+    pub stroke_disabled: bool,
     /// Fill paint mode — `Solid` / `LinearGradient` / `RadialGradient`
     /// / `Image`. The current canvas paints all of them as the solid
     /// `fill` colour; carried so a richer painter can branch later.
@@ -579,6 +528,7 @@ pub struct SceneNode {
     /// Resolved stroke (colour + width). `$ref` stroke colours are
     /// resolved at build time. `None` = no stroke.
     pub stroke: Option<SceneStroke>,
+    pub stroke_paint: Option<std::sync::Arc<crate::SceneStrokePaint>>,
     /// Text content — `Some` for Text nodes (and the lucide glyph
     /// name for `icon_font`). `None` for non-text kinds. Styled text
     /// is flattened into this string; per-segment styling rides in
@@ -594,6 +544,9 @@ pub struct SceneNode {
     pub font_size: f32,
     /// CSS-style font weight (100-900). `0` = default (400).
     pub font_weight: u16,
+    /// Explicit OpenType kerning; absent retains legacy text dispatch.
+    pub font_kerning: Option<bool>,
+    pub font_features: std::collections::BTreeMap<String, u32>,
     /// Node-level italic (`fontStyle: italic`). Per-run overrides ride
     /// in `text_runs`.
     pub italic: bool,
@@ -601,6 +554,7 @@ pub struct SceneNode {
     pub underline: bool,
     /// Node-level strikethrough decoration.
     pub strikethrough: bool,
+    pub text_decoration_skip_ink: Option<bool>,
     /// Line-height multiplier (`1.2` = 120%). `0.0` = renderer default.
     pub line_height: f32,
     /// Extra tracking in doc-px between glyphs.
@@ -633,6 +587,8 @@ pub struct SceneNode {
     /// Preserved SVG path data for imported Path nodes. Coordinates
     /// are local doc-px relative to `bounds.origin`.
     pub svg_path: Option<String>,
+    /// Exact source-coordinate mapping, independent of authored selection bounds.
+    pub svg_view_box: Option<std::sync::Arc<crate::path_coordinates::ScenePathGeometry>>,
     /// Ellipse arc start angle in degrees. `None` = full ellipse.
     pub arc_start_angle: Option<f32>,
     /// Ellipse arc sweep angle in degrees. `None` = full ellipse.
@@ -657,6 +613,9 @@ pub struct SceneNode {
     /// Stable content hash for `image_src`. The canvas painter uses it
     /// as a per-frame cache key without hashing large data URLs again.
     pub image_src_id: u64,
+    pub image_thumbnail_src: Option<std::sync::Arc<str>>,
+    pub image_thumbnail_src_id: u64,
+    pub image_nearest_sampling: bool,
     /// How `image_src` is placed into `bounds`.
     pub image_fit: SceneImageFit,
     /// How an image node composites with the already-painted backdrop.
@@ -667,6 +626,10 @@ pub struct SceneNode {
     /// `(x, y)` to image UV as `(m00*x + m01*y + m02,
     /// m10*x + m11*y + m12)`. `None` keeps the placement-mode default.
     pub image_transform: Option<[f32; 6]>,
+    /// Authored image-fill rotation, preserved in degrees for source fitting.
+    pub image_rotation_degrees: Option<f32>,
+    pub image_geometry: Option<std::sync::Arc<jian_ops_schema::style::ImageFieldGeometry>>,
+    pub image_paint: Option<std::sync::Arc<jian_ops_schema::style::ImageFillBody>>,
     /// Authored source dimensions used to keep TILE frequency stable when the
     /// backend holds a downsampled raster. Invalid/absent values use the raster.
     pub image_original_size: Option<[f32; 2]>,
@@ -751,187 +714,6 @@ pub struct SceneWidgetOption {
     pub label: String,
 }
 
-impl SceneWidget {
-    /// Resolve the active tab option by authored/live value. Missing or
-    /// stale values deterministically fall back to the first tab/panel,
-    /// mirroring jian-core's `render::scene::active_tab_index`.
-    pub fn active_tab_index(&self) -> usize {
-        self.value_str
-            .as_deref()
-            .and_then(|value| self.options.iter().position(|tab| tab.value == value))
-            .unwrap_or(0)
-    }
-}
-
-impl SceneNode {
-    /// Children that participate in paint **and** hit-test.
-    ///
-    /// `tabs` is the only first-class widget whose children are alternative
-    /// panels rather than ordinary descendants (`tabs[i]` maps to
-    /// `children[i]`), and a tabs frame compiles to a single-cell grid where
-    /// every panel overlaps the others. Painter and hit-test must therefore
-    /// share this one rule: without it, clicking visible content on the second
-    /// tab selects the first tab's panel, which was never drawn.
-    pub fn visible_children(&self) -> &[SceneNode] {
-        let Some(widget) = self.widget.as_ref().filter(|widget| widget.kind == "tabs") else {
-            return &self.children;
-        };
-        self.children
-            .get(widget.active_tab_index())
-            .map(std::slice::from_ref)
-            .unwrap_or_default()
-    }
-
-    /// Depth-first search for the node with `id` in this subtree
-    /// (self included). Mirrors `SceneNode::find`.
-    pub fn find(&self, id: &str) -> Option<&SceneNode> {
-        #[cfg(any(test, feature = "test-support"))]
-        record_find_visit();
-
-        if self.id == id {
-            return Some(self);
-        }
-        for child in &self.children {
-            if let Some(found) = child.find(id) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
-    fn translate_subtree(&mut self, dx: f32, dy: f32) {
-        self.bounds.origin.x += dx;
-        self.bounds.origin.y += dy;
-        if rect_has_extent(self.aggregate_bounds_cache) {
-            self.aggregate_bounds_cache.origin.x += dx;
-            self.aggregate_bounds_cache.origin.y += dy;
-        }
-        for point in &mut self.points {
-            point.x += dx;
-            point.y += dy;
-        }
-        for anchor in &mut self.path_anchors {
-            anchor.pos.x += dx;
-            anchor.pos.y += dy;
-            if let Some(handle) = anchor.handle_in.as_mut() {
-                handle.x += dx;
-                handle.y += dy;
-            }
-            if let Some(handle) = anchor.handle_out.as_mut() {
-                handle.x += dx;
-                handle.y += dy;
-            }
-        }
-        for child in &mut self.children {
-            child.translate_subtree(dx, dy);
-        }
-    }
-
-    /// Resolved bounds for selection / rotation-pivot math: the node's
-    /// own `bounds` when it is bounded, otherwise a loader-precomputed
-    /// subtree rect when available, otherwise the union of children's
-    /// aggregate bounds for hand-built scenes.
-    pub fn aggregate_bounds(&self) -> Rect {
-        if rect_has_extent(self.bounds) {
-            return self.bounds;
-        }
-        if rect_has_extent(self.aggregate_bounds_cache) {
-            return self.aggregate_bounds_cache;
-        }
-        Self::compute_aggregate_bounds(self.bounds, &self.children)
-    }
-
-    /// Compute the aggregate subtree rect from resolved own bounds and
-    /// children. Used by the loader during scene construction and by
-    /// [`aggregate_bounds`](Self::aggregate_bounds) as the uncached
-    /// fallback for hand-built test scenes.
-    pub fn compute_aggregate_bounds(bounds: Rect, children: &[SceneNode]) -> Rect {
-        if rect_has_extent(bounds) {
-            return bounds;
-        }
-        let mut iter = children
-            .iter()
-            .map(SceneNode::aggregate_bounds)
-            .filter(|r| rect_has_extent(*r));
-        let Some(first) = iter.next() else {
-            return Rect::ZERO;
-        };
-        let (mut min_x, mut min_y) = (first.origin.x, first.origin.y);
-        let (mut max_x, mut max_y) = (first.origin.x + first.size.x, first.origin.y + first.size.y);
-        for r in iter {
-            min_x = min_x.min(r.origin.x);
-            min_y = min_y.min(r.origin.y);
-            max_x = max_x.max(r.origin.x + r.size.x);
-            max_y = max_y.max(r.origin.y + r.size.y);
-        }
-        Rect::xywh(min_x, min_y, max_x - min_x, max_y - min_y)
-    }
-
-    /// Construct a leaf render node with all paint fields cleared.
-    /// Builders set `bounds` / `fill` / `text` / … after.
-    pub fn leaf(id: impl Into<String>, kind: NodeKind) -> Self {
-        Self {
-            id: id.into(),
-            kind,
-            bounds: Rect::ZERO,
-            aggregate_bounds_cache: Rect::ZERO,
-            opacity: 1.0,
-            composite_opacity: 1.0,
-            blend_mode: ImageBlendMode::Normal,
-            rotation: 0.0,
-            flip_x: false,
-            flip_y: false,
-            corner_radius: 0.0,
-            corner_radii: None,
-            clip_content: false,
-            fill: None,
-            fill_layers: Vec::new(),
-            fill_type: SceneFillType::Solid,
-            gradient: None,
-            shader: None,
-            stroke: None,
-            text: None,
-            text_runs: Vec::new(),
-            font_family: String::new(),
-            font_size: 0.0,
-            font_weight: 0,
-            italic: false,
-            underline: false,
-            strikethrough: false,
-            line_height: 0.0,
-            letter_spacing: 0.0,
-            text_align: SceneTextAlign::Left,
-            text_vertical_align: SceneTextVerticalAlign::Top,
-            text_wrap: false,
-            points: Vec::new(),
-            path_anchors: Vec::new(),
-            path_closed: false,
-            is_mask: false,
-            mask_type: None,
-            even_odd_fill: false,
-            svg_path: None,
-            arc_start_angle: None,
-            arc_sweep_angle: None,
-            arc_inner_radius: None,
-            polygon_sides: 3,
-            image_src: None,
-            video: None,
-            image_src_id: 0,
-            image_fit: SceneImageFit::Fill,
-            image_blend_mode: ImageBlendMode::Normal,
-            image_transform: None,
-            image_original_size: None,
-            image_tile_scale: 1.0,
-            image_adjustments: ImageAdjustments::default(),
-            effects: Vec::new(),
-            hidden: false,
-            locked: false,
-            widget: None,
-            children: Vec::new(),
-        }
-    }
-}
-
 /// Resolved stroke descriptor — colour already `$ref`-resolved.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SceneStroke {
@@ -980,18 +762,9 @@ pub enum SceneImageFit {
     Stretch,
 }
 
-impl SceneImageFit {
-    pub fn to_draw_mode(self) -> ImageDrawMode {
-        match self {
-            Self::Fill => ImageDrawMode::Fill,
-            Self::Fit => ImageDrawMode::Fit,
-            Self::Crop => ImageDrawMode::Crop,
-            Self::Tile => ImageDrawMode::Tile,
-            Self::Stretch => ImageDrawMode::Stretch,
-        }
-    }
-}
-
 #[cfg(test)]
 #[path = "layout_scene_unit_tests.rs"]
 mod tests;
+
+#[path = "layout_scene_node_impl.rs"]
+mod node_impl;

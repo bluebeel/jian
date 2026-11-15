@@ -9,6 +9,7 @@ pub mod image_store;
 pub mod paint;
 pub mod scene;
 mod scene_commands;
+pub mod shadow;
 pub mod text;
 pub mod text_geometry;
 pub mod widget_metrics;

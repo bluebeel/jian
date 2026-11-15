@@ -48,6 +48,9 @@ pub enum MaskType {
     Alpha,
     Vector,
     Luminance,
+    /// SVG explicitly requests luminance after the sRGB transfer is decoded.
+    #[serde(rename = "luminance-linear")]
+    LuminanceLinear,
 }
 
 /// Shared fields across all node types.
@@ -58,6 +61,13 @@ pub enum MaskType {
 #[serde(rename_all = "camelCase")]
 pub struct PenNodeBase {
     pub id: String,
+    /// Presence bits for explicit-null geometry in a canonical `PenNode`.
+    /// Numeric setters take precedence when serializing; this never changes
+    /// the `Option` values consumed by layout or rendering.
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[cfg_attr(feature = "export-ts", ts(skip))]
+    pub authored_geometry_nulls: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -100,7 +110,7 @@ pub struct PenNodeBase {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub transition: Option<crate::motion::Transition>,
+    pub transition: Option<Box<crate::motion::Transition>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animations: Option<Vec<crate::motion::NodeAnimation>>,
 }

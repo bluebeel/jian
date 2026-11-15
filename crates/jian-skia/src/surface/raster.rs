@@ -50,9 +50,43 @@ impl SkiaSurface {
     /// RGBA8888. `buf.len()` must equal `width * height * 4`. Returns
     /// `true` on success.
     pub fn read_rgba8(&mut self, buf: &mut [u8]) -> bool {
+        let Ok(width) = usize::try_from(self.inner.width()) else {
+            return false;
+        };
+        let Some(row_bytes) = width.checked_mul(4) else {
+            return false;
+        };
+        self.read_rgba8_strided(buf, row_bytes)
+    }
+
+    /// Copy straight RGBA8888 directly into caller-owned strided storage.
+    /// Padding is not pixel data and remains untouched. The slice must cover
+    /// `(height - 1) * row_bytes + width * 4`; trailing padding is optional.
+    /// Invalid/overflowing extents return false before entering Skia.
+    pub fn read_rgba8_strided(&mut self, out: &mut [u8], row_bytes: usize) -> bool {
         use skia_safe::{image::CachingHint, AlphaType, ColorType, ISize, ImageInfo};
-        let w = self.inner.width();
-        let h = self.inner.height();
+        let (w, h) = (self.inner.width(), self.inner.height());
+        let (Ok(width), Ok(height)) = (usize::try_from(w), usize::try_from(h)) else {
+            return false;
+        };
+        if width == 0 || height == 0 {
+            return false;
+        }
+        let Some(tight_row) = width.checked_mul(4) else {
+            return false;
+        };
+        if row_bytes < tight_row {
+            return false;
+        }
+        let Some(required) = (height - 1)
+            .checked_mul(row_bytes)
+            .and_then(|rows| rows.checked_add(tight_row))
+        else {
+            return false;
+        };
+        if out.len() < required {
+            return false;
+        }
         let info = ImageInfo::new(
             ISize::new(w, h),
             ColorType::RGBA8888,
@@ -60,7 +94,32 @@ impl SkiaSurface {
             None,
         );
         let image = self.inner.image_snapshot();
-        image.read_pixels(&info, buf, (w as usize) * 4, (0, 0), CachingHint::Allow)
+        if info.valid_row_bytes(row_bytes) {
+            return image.read_pixels(&info, out, row_bytes, (0, 0), CachingHint::Allow);
+        }
+        // The existing FFI accepts arbitrary byte padding, whereas Skia's
+        // RGBA strided API requires a pixel-aligned row size. Read each row
+        // directly for that uncommon case instead of allocating a full tight
+        // frame and copying it back into the caller's padded storage.
+        let row_info = ImageInfo::new(
+            ISize::new(w, 1),
+            ColorType::RGBA8888,
+            AlphaType::Unpremul,
+            None,
+        );
+        for row in 0..height {
+            let start = row * row_bytes;
+            if !image.read_pixels(
+                &row_info,
+                &mut out[start..start + tight_row],
+                tight_row,
+                (0, row as i32),
+                CachingHint::Allow,
+            ) {
+                return false;
+            }
+        }
+        true
     }
 }
 

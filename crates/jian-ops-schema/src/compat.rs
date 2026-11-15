@@ -51,6 +51,56 @@ fn load_value_with(
     mut raw: serde_json::Value,
     opts: LoadOptions,
 ) -> OpsResult<LoadResult<PenDocument>> {
+    let prepared = prepare_value(&mut raw)?;
+    let doc = crate::node::image_src::intern::with_load_scope(prepared.table, || {
+        serde_json::from_value(raw)
+    })?;
+    finish_document(doc, opts, prepared.warnings, prepared.pending_thumbs)
+}
+
+/// Decode canonical typed JSON after a caller has probed its header from the
+/// same immutable input. Body fields may be absent from `header`; retain every
+/// top-level key (unknown values may be null), versions, image tables and flags.
+/// Product loaders must decline this path when legacy preprocessing is needed.
+pub fn load_reader_with_header(
+    reader: impl std::io::Read,
+    mut header: serde_json::Value,
+) -> OpsResult<LoadResult<PenDocument>> {
+    let prepared = prepare_value(&mut header)?;
+    let doc = crate::node::image_src::intern::with_load_scope(prepared.table, || {
+        serde_json::from_reader(reader)
+    })?;
+    finish_document(
+        doc,
+        LoadOptions::default(),
+        prepared.warnings,
+        prepared.pending_thumbs,
+    )
+}
+/// Slice counterpart of [`load_reader_with_header`]. The caller retains its
+/// source; file loaders can unmap their header before using the reader form.
+pub fn load_str_with_header(
+    source: &str,
+    mut header: serde_json::Value,
+) -> OpsResult<LoadResult<PenDocument>> {
+    let prepared = prepare_value(&mut header)?;
+    let doc = crate::node::image_src::intern::with_load_scope(prepared.table, || {
+        serde_json::from_str(source)
+    })?;
+    finish_document(
+        doc,
+        LoadOptions::default(),
+        prepared.warnings,
+        prepared.pending_thumbs,
+    )
+}
+
+struct PreparedValue {
+    warnings: Vec<LoadWarning>,
+    table: std::collections::HashMap<String, std::sync::Arc<str>>,
+    pending_thumbs: crate::image_thumbs::PendingThumbSeed,
+}
+fn prepare_value(raw: &mut serde_json::Value) -> OpsResult<PreparedValue> {
     let format_version = raw.get("formatVersion").and_then(|v| v.as_str());
     let legacy_version = raw.get("version").and_then(|v| v.as_str());
     let v = format_version.or(legacy_version);
@@ -98,7 +148,7 @@ fn load_value_with(
                     .to_owned(),
             });
         }
-        collect_viewport_writes(&raw, "$", &mut warnings);
+        collect_viewport_writes(raw, "$", &mut warnings);
     }
 
     if raw.get("logicModules").is_some() {
@@ -117,11 +167,20 @@ fn load_value_with(
     // image cost one allocation instead of a thousand copies. The same
     // scope content-interns duplicate large inline data URLs, so
     // legacy (pre-table) files stop inflating too.
-    let pending_thumbs = crate::image_thumbs::take_pending_from_document(&mut raw);
-    let table = crate::image_table::take_image_table(&mut raw);
-    let mut doc: PenDocument =
-        crate::node::image_src::intern::with_load_scope(table, || serde_json::from_value(raw))?;
-
+    let pending_thumbs = crate::image_thumbs::take_pending_from_document(raw);
+    let table = crate::image_table::take_image_table(raw);
+    Ok(PreparedValue {
+        warnings,
+        table,
+        pending_thumbs,
+    })
+}
+fn finish_document(
+    mut doc: PenDocument,
+    opts: LoadOptions,
+    mut warnings: Vec<LoadWarning>,
+    pending_thumbs: crate::image_thumbs::PendingThumbSeed,
+) -> OpsResult<LoadResult<PenDocument>> {
     if let Err((path, reason)) = crate::motion::validate_document(&doc) {
         return Err(OpsSchemaError::MotionValidation { path, reason });
     }

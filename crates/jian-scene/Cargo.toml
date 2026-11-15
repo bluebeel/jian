@@ -15,3 +15,4 @@ jian-core = { path = "../jian-core" }
 jian-ops-schema = { path = "../jian-ops-schema" }
 serde_json = { workspace = true }
 jian-widgets = { path = "../jian-widgets" }
+kurbo = "0.13.1"

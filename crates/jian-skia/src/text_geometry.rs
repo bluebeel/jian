@@ -186,6 +186,7 @@ fn build_paragraph(field: &SkiaTextField, collection: &FontCollection) -> Paragr
         Width::NORMAL,
         slant,
     ));
+    crate::font_variations::set_paragraph_weight(&mut text_style, field.font_weight);
     if field.letter_spacing.is_finite() && field.letter_spacing != 0.0 {
         text_style.set_letter_spacing(field.letter_spacing);
     }

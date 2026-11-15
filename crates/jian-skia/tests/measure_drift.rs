@@ -63,6 +63,7 @@ fn skia_measure_layout_agrees_with_paragraph_intrinsic_width() {
     // natural width. The layout pipeline should produce the same
     // value to within Skia's float rounding.
     let runs = [StyledRun {
+        font_features: None,
         text: "Hello world",
         font_family: None,
         font_size: 18.0,
@@ -97,6 +98,7 @@ fn skia_measure_disagrees_with_estimator_on_cjk() {
     // estimator change closes the gap on its own this test will
     // false-fire — that's a useful canary, not a regression.
     let cjk_runs = [StyledRun {
+        font_features: None,
         text: "你好世界",
         font_family: None,
         font_size: 18.0,

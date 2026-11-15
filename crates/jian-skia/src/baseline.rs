@@ -126,6 +126,7 @@ impl ParagraphBaseline {
                 Slant::Upright
             },
         ));
+        crate::font_variations::set_paragraph_weight(&mut text_style, weight);
         if line_height > 0.0 {
             text_style.set_height(line_height);
             text_style.set_height_override(true);

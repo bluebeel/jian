@@ -1693,12 +1693,15 @@ fn first_shadow(json: &Value) -> Option<ShadowSpec> {
         let dy = obj.get("offsetY").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
         let blur = obj.get("blur").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
         let spread = obj.get("spread").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-        let color = obj
+        let (color, float_color) = obj
             .get("color")
             .and_then(|v| v.as_str())
-            .and_then(Color::from_hex)
-            .unwrap_or(Color::rgba(0, 0, 0, 0x40));
+            .and_then(super::shadow::parse_shadow_color)
+            .unwrap_or((Color::rgba(0, 0, 0, 0x40), None));
         return Some(ShadowSpec {
+            blur_kernel: super::shadow::kernel_from_json(e),
+            float_color,
+            silhouette: None,
             color,
             dx,
             dy,
@@ -1746,7 +1749,7 @@ fn stroke_op(json: &Value) -> Option<StrokeOp> {
     })
 }
 
-fn corner_radii(json: &Value) -> Option<BorderRadii> {
+pub(super) fn corner_radii(json: &Value) -> Option<BorderRadii> {
     let cr = json.get("cornerRadius")?;
     if let Some(n) = cr.as_f64() {
         return Some(BorderRadii::uniform(n as f32));

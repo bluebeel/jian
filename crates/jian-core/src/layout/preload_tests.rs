@@ -149,6 +149,7 @@ fn fit_content_text_input_with_leading_icon_measures_input_anatomy() {
     }));
     let rect = compute_single_child(input);
     let run = StyledRun {
+        font_features: None,
         text: "Search",
         font_family: None,
         font_size: 14.0,
@@ -188,6 +189,7 @@ fn fit_content_text_input_without_icon_measures_horizontal_padding() {
     }));
     let rect = compute_single_child(input);
     let run = StyledRun {
+        font_features: None,
         text: "Find",
         font_family: None,
         font_size: 14.0,

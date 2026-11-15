@@ -1,0 +1,50 @@
+uniform float4 bounds;
+uniform float radius;
+uniform float blur;
+uniform float inner;
+uniform float4 tint;
+
+// Integral of max(1-|x|,0), with unit area and support[-1,1].
+float triangularCDF(float x) {
+    float remaining = 1.0 - min(abs(x), 1.0);
+    float tail = 0.5 * remaining * remaining;
+    return x < 0.0 ? tail : 1.0 - tail;
+}
+float interval(float center, float extent) {
+    return triangularCDF(center + extent) - triangularCDF(center - extent);
+}
+float silhouette(float2 p) {
+    float2 halfSize = (bounds.zw - bounds.xy) * 0.5;
+    if (any(lessThanEqual(halfSize, float2(0.0)))) return 0.0;
+    p -= (bounds.xy + bounds.zw) * 0.5;
+    if (blur <= 0.0) {
+        float2 q = abs(p) - halfSize + radius;
+        float distance = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+        return distance <= 0.0 ? 1.0 : 0.0;
+    }
+    p /= blur;
+    halfSize /= blur;
+    float r = radius / blur;
+    if (any(greaterThan(abs(p), halfSize + 1.0))) return 0.0;
+    if (r == 0.0) return interval(p.x, halfSize.x) * interval(p.y, halfSize.y);
+    if (all(lessThan(abs(p), halfSize - r - 1.0))) return 1.0;
+    if (abs(p.y) > abs(p.x)) { p = p.yx; halfSize = halfSize.yx; }
+    float lo = max(-1.0, p.y - halfSize.y);
+    float hi = min(1.0, p.y + halfSize.y);
+    if (hi <= lo) return 0.0;
+    float step = (hi - lo) * 0.25;
+    float sum = 0.0, weights = 0.0;
+    for (int slice = 0; slice < 4; ++slice) {
+        float position = lo + (float(slice) + 0.5) * step;
+        float edge = max(abs(p.y - position) - (halfSize.y - r), 0.0);
+        float span = halfSize.x - r + sqrt(max(r * r - edge * edge, 0.0));
+        float weight = 1.0 - abs(position);
+        sum += weight * interval(p.x, span);
+        weights += weight;
+    }
+    return sum * ((triangularCDF(hi) - triangularCDF(lo)) / weights);
+}
+half4 main(float2 p) {
+    float coverage = silhouette(p);
+    return half4(tint * (inner == 1.0 ? 1.0 - coverage : coverage));
+}

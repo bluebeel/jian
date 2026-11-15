@@ -47,6 +47,7 @@ pub struct StyledRun<'a> {
     pub font_weight: u16,
     pub font_style: FontStyleKind,
     pub letter_spacing: f32,
+    pub font_features: Option<&'a std::collections::BTreeMap<String, u32>>,
 }
 
 /// Backend input for one text-leaf measurement.
@@ -266,6 +267,7 @@ mod tests {
 
     fn run<'a>(text: &'a str, weight: u16) -> StyledRun<'a> {
         StyledRun {
+            font_features: None,
             text,
             font_family: None,
             font_size: 16.0,
@@ -404,6 +406,7 @@ mod tests {
     #[test]
     fn backend_natural_height_honors_authored_line_height() {
         let runs = [StyledRun {
+            font_features: None,
             text: "Navigation",
             font_family: None,
             font_size: 15.0,

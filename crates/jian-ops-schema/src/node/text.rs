@@ -83,6 +83,12 @@ pub struct TextNode {
     pub font_size: Option<crate::node::base::NumberOrExpression>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_weight: Option<FontWeight>,
+    /// Explicit OpenType kerning; absence preserves the renderer default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_kerning: Option<bool>,
+    /// Explicit OpenType feature tags, for example `salt: 1` or `liga: 0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_features: Option<std::collections::BTreeMap<String, u32>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_style: Option<FontStyleKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -99,6 +105,9 @@ pub struct TextNode {
     pub underline: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strikethrough: Option<bool>,
+    /// Whether underlines leave gaps around descender ink; absent is legacy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_decoration_skip_ink: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<Vec<PenFill>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -108,13 +117,13 @@ pub struct TextNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bindings: Option<crate::events::Bindings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub events: Option<crate::events::EventHandlers>,
+    pub events: Option<Box<crate::events::EventHandlers>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lifecycle: Option<crate::lifecycle::NodeLifecycleHooks>,
+    pub lifecycle: Option<Box<crate::lifecycle::NodeLifecycleHooks>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub semantics: Option<crate::semantics::SemanticsMeta>,
+    pub semantics: Option<Box<crate::semantics::SemanticsMeta>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gestures: Option<crate::gestures::GestureOverrides>,
+    pub gestures: Option<Box<crate::gestures::GestureOverrides>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<crate::navigation::NavigationRoute>,
 }

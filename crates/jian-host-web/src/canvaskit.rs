@@ -30,6 +30,10 @@ extern "C" {
     pub fn delete_image(this: &CkRuntime, image: &CkImage);
     #[wasm_bindgen(method, js_name = dispose)]
     pub fn dispose_runtime(this: &CkRuntime);
+    #[wasm_bindgen(method, js_name = setShadowKernelSource)]
+    pub fn set_shadow_kernel_source(this: &CkRuntime, source: &str);
+    #[wasm_bindgen(method, js_name = setCornerShadowKernelSource)]
+    pub fn set_corner_shadow_kernel_source(this: &CkRuntime, source: &str);
     #[wasm_bindgen(method, js_name = registerFont)]
     pub fn register_font(this: &CkRuntime, alias: &str, actual_family: &str, bytes: &[u8]) -> bool;
     #[cfg(all(test, target_arch = "wasm32"))]

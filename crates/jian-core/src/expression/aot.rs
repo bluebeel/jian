@@ -291,8 +291,8 @@ fn node_expression_surface(
                 $n.base.opacity.as_ref(),
                 $n.base.enabled.as_ref(),
                 $n.bindings.as_ref(),
-                $n.events.as_ref(),
-                $n.lifecycle.as_ref(),
+                $n.events.as_deref(),
+                $n.lifecycle.as_deref(),
                 None,
             )
         };
@@ -301,8 +301,8 @@ fn node_expression_surface(
                 $n.base.opacity.as_ref(),
                 $n.base.enabled.as_ref(),
                 $n.bindings.as_ref(),
-                $n.events.as_ref(),
-                $n.lifecycle.as_ref(),
+                $n.events.as_deref(),
+                $n.lifecycle.as_deref(),
                 $n.children.as_ref(),
             )
         };

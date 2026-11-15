@@ -11,7 +11,7 @@ readme       = "README.md"
 [dependencies]
 base64     = "0.22"
 serde      = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 schemars   = { workspace = true }
 ts-rs      = { workspace = true, optional = true }
 thiserror  = { workspace = true }

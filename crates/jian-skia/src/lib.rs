@@ -31,8 +31,9 @@
 //! let png = surface.encode_png().unwrap();
 //! ```
 
-pub mod backend;
 #[cfg(feature = "textlayout")]
+pub mod advance_grid;
+pub mod backend;
 pub mod baseline;
 #[cfg(feature = "textlayout")]
 pub mod bundled_fonts;
@@ -43,17 +44,24 @@ pub mod convert;
 pub mod font_lock;
 #[cfg(feature = "textlayout")]
 pub mod font_resolve;
+#[cfg(feature = "textlayout")]
+pub mod font_variations;
 pub mod icons;
 pub(crate) mod image;
 pub mod image_registry;
 #[cfg(feature = "textlayout")]
 pub mod measure;
+pub mod mesh_geometry;
 pub mod path;
+pub mod raster_sampling;
 pub mod shader_cache;
+pub mod shader_geometry;
 pub mod startup;
 pub mod surface;
 #[cfg(feature = "textlayout")]
 pub mod text_geometry;
+pub mod triangular_corner_shadow;
+pub mod triangular_shadow;
 
 pub use backend::SkiaBackend;
 #[cfg(feature = "textlayout")]

@@ -1,4 +1,12 @@
+mod gradient_geometry;
+mod paint_visibility;
+pub use gradient_geometry::*;
+
 use serde::{Deserialize, Serialize};
+
+// Persisted style numbers use JSON's f64 precision. Convert to f32 only when
+// projecting into layout or paint payloads, so an unrelated edit cannot
+// quantize authored values or change their round-trip representation.
 
 // --- Blend mode ---
 
@@ -31,7 +39,7 @@ pub enum BlendMode {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 pub struct GradientStop {
-    pub offset: f32,
+    pub offset: f64,
     pub color: String,
 }
 
@@ -39,20 +47,20 @@ pub struct GradientStop {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 pub struct ImageOriginalSize {
-    pub width: f32,
-    pub height: f32,
+    pub width: f64,
+    pub height: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 pub struct ImageTransform {
-    pub m00: f32,
-    pub m01: f32,
-    pub m02: f32,
-    pub m10: f32,
-    pub m11: f32,
-    pub m12: f32,
+    pub m00: f64,
+    pub m01: f64,
+    pub m02: f64,
+    pub m10: f64,
+    pub m11: f64,
+    pub m12: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -77,7 +85,7 @@ pub enum PenFill {
     RadialGradient(RadialGradientBody),
     MeshGradient(MeshGradientBody),
     Shader(ShaderFillBody),
-    Image(ImageFillBody),
+    Image(Box<ImageFillBody>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -85,11 +93,14 @@ pub enum PenFill {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct SolidFillBody {
+    /// Absent retains the historical enabled paint behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     pub color: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explain: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opacity: Option<f32>,
+    pub opacity: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend_mode: Option<BlendMode>,
 }
@@ -99,13 +110,18 @@ pub struct SolidFillBody {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct LinearGradientBody {
+    /// Absent retains the historical enabled paint behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub angle: Option<f32>,
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<Box<GradientGeometry>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angle: Option<f64>,
     pub stops: Vec<GradientStop>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explain: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opacity: Option<f32>,
+    pub opacity: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend_mode: Option<BlendMode>,
 }
@@ -115,17 +131,22 @@ pub struct LinearGradientBody {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct RadialGradientBody {
+    /// Absent retains the historical enabled paint behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cx: Option<f32>,
+    pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cy: Option<f32>,
+    pub geometry: Option<Box<GradientGeometry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub radius: Option<f32>,
+    pub cx: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cy: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f64>,
     pub stops: Vec<GradientStop>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explain: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opacity: Option<f32>,
+    pub opacity: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend_mode: Option<BlendMode>,
 }
@@ -152,13 +173,16 @@ pub struct MeshVertexStop {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct MeshGradientBody {
+    /// Absent retains the historical enabled paint behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     pub rows: u32,
     pub cols: u32,
     pub stops: Vec<MeshVertexStop>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explain: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opacity: Option<f32>,
+    pub opacity: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend_mode: Option<BlendMode>,
 }
@@ -175,10 +199,10 @@ pub struct MeshGradientBody {
 #[serde(untagged)]
 pub enum ShaderUniformValue {
     /// `float` uniform.
-    Float(f32),
+    Float(f64),
     /// `vec2` / `vec3` / `vec4` uniform — the length picks the SkSL
     /// type (RuntimeShaderBuilder rejects a mismatched arity).
-    Vec(Vec<f32>),
+    Vec(Vec<f64>),
     /// `color` uniform — a `#rgb` / `#rrggbb` / `#rrggbbaa` hex string
     /// the backend expands into a `vec4` before binding.
     Color(String),
@@ -214,6 +238,9 @@ pub enum ShaderPresetV1 {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct ShaderFillBody {
+    /// Absent retains the historical enabled paint behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     /// Loader-expanded source selector. Only `"turbulence"` is recognized
     /// in v1; expansion is runtime-only and is never serialized into `sksl`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -234,16 +261,24 @@ pub struct ShaderFillBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explain: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opacity: Option<f32>,
+    pub opacity: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend_mode: Option<BlendMode>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct ImageFillBody {
+    /// Absent retains the historical enabled paint behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Explicit affine image/tile geometry. Absent values retain legacy modes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature="export-ts",ts(optional=nullable))]
+    pub geometry: Option<Box<ImageFieldGeometry>>,
+
     // Image-fill source — an `Arc`-shared string (`data:` URL or path),
     // same rationale as `ImageNode.src` (see `crate::node::ImageSrc`): a
     // multi-MB data URL here is otherwise cloned + content-compared on
@@ -251,43 +286,59 @@ pub struct ImageFillBody {
     #[schemars(with = "String")]
     #[cfg_attr(feature = "export-ts", ts(as = "String"))]
     pub url: crate::node::ImageSrc,
+    /// Optional display preview. The original source remains available in `url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    #[cfg_attr(feature = "export-ts", ts(as = "Option<String>", optional = nullable))]
+    pub thumbnail_url: Option<crate::node::ImageSrc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub nearest_sampling: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<ImageFillMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_size: Option<ImageOriginalSize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<ImageTransform>,
+    /// Authored image-fill rotation in degrees; complete turns retain their
+    /// floating-point source-fit arithmetic rather than being reduced modulo360.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub rotation: Option<f64>,
     /// Figma TILE paint scale. A value of `1.0` draws each source bitmap pixel
     /// as one document pixel; omitted values retain that default. Other image
     /// placement modes ignore this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
-    pub tile_scale: Option<f32>,
+    pub tile_scale: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explain: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opacity: Option<f32>,
+    pub opacity: Option<f64>,
     /// Per-fill compositing mode. Optional for wire compatibility with
     /// documents authored before image fills supported blending.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend_mode: Option<BlendMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exposure: Option<f32>,
+    pub exposure: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub contrast: Option<f32>,
+    pub contrast: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub saturation: Option<f32>,
+    pub saturation: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
+    pub temperature: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tint: Option<f32>,
+    pub tint: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub highlights: Option<f32>,
+    pub highlights: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub shadows: Option<f32>,
+    pub shadows: Option<f64>,
 }
 
 // --- Stroke ---
+
+mod stroke_box;
+pub use stroke_box::PenStroke;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
@@ -295,13 +346,13 @@ pub struct ImageFillBody {
 #[serde(rename_all = "camelCase")]
 pub struct SidedThickness {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub top: Option<f32>,
+    pub top: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub right: Option<f32>,
+    pub right: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bottom: Option<f32>,
+    pub bottom: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub left: Option<f32>,
+    pub left: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -309,8 +360,8 @@ pub struct SidedThickness {
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(untagged)]
 pub enum StrokeThickness {
-    Uniform(f32),
-    PerSide([f32; 4]),
+    Uniform(f64),
+    PerSide([f64; 4]),
     Sided(SidedThickness),
 }
 
@@ -348,7 +399,7 @@ pub enum StrokeCap {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 #[serde(rename_all = "camelCase")]
-pub struct PenStroke {
+pub struct PenStrokeBody {
     pub thickness: StrokeThickness,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<StrokeAlign>,
@@ -357,9 +408,9 @@ pub struct PenStroke {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cap: Option<StrokeCap>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dash_pattern: Option<Vec<f32>>,
+    pub dash_pattern: Option<Vec<f64>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dash_offset: Option<f32>,
+    pub dash_offset: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<Vec<PenFill>>,
 }
@@ -381,9 +432,28 @@ pub enum PenEffect {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
 pub struct BlurBody {
-    pub radius: f32,
+    pub radius: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible: Option<bool>,
+}
+
+/// Blur profile for a shadow silhouette. Missing values retain Gaussian blur.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(export, export_to = "ops.ts"))]
+#[serde(rename_all = "camelCase")]
+pub enum ShadowBlurKernel {
+    #[default]
+    Gaussian,
+    Triangular,
+}
+
+impl ShadowBlurKernel {
+    pub fn is_gaussian(&self) -> bool {
+        matches!(self, Self::Gaussian)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -395,10 +465,12 @@ pub struct ShadowBody {
     pub inner: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible: Option<bool>,
-    pub offset_x: f32,
-    pub offset_y: f32,
-    pub blur: f32,
-    pub spread: f32,
+    pub offset_x: f64,
+    pub offset_y: f64,
+    pub blur: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur_kernel: Option<ShadowBlurKernel>,
+    pub spread: f64,
     pub color: String,
 }
 
@@ -443,17 +515,23 @@ pub struct StyledTextSegment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub font_size: Option<f32>,
+    pub font_size: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_weight: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_style: Option<FontStyleKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<String>,
+    /// Optional complete authored paint stack. Absence inherits `fill`/node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_paints: Option<Vec<PenFill>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub underline: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strikethrough: Option<bool>,
+    /// Whether underlines leave gaps around descender ink; absent is legacy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_decoration_skip_ink: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub href: Option<String>,
 }
@@ -621,7 +699,26 @@ mod tests {
             r#"{"type":"image","url":"data:image/png;base64,...","mode":"tile"}"#,
         )
         .unwrap();
-        assert!(matches!(old, PenFill::Image(image) if image.tile_scale.is_none()));
+        assert!(
+            matches!(old, PenFill::Image(image) if image.tile_scale.is_none()
+            && image.thumbnail_url.is_none() && image.nearest_sampling.is_none())
+        );
+    }
+
+    #[test]
+    fn image_fill_preview_sources_are_optional_strings() {
+        let json = r#"{"type":"image","url":"original.png","thumbnailUrl":"preview.png","nearestSampling":true}"#;
+        let fill: PenFill = serde_json::from_str(json).unwrap();
+        let PenFill::Image(image) = &fill else {
+            panic!("image")
+        };
+        assert_eq!(image.url, "original.png");
+        assert_eq!(image.thumbnail_url.as_deref(), Some("preview.png"));
+        assert_eq!(image.nearest_sampling, Some(true));
+        assert_eq!(
+            serde_json::to_value(fill).unwrap(),
+            serde_json::from_str::<serde_json::Value>(json).unwrap()
+        );
     }
 
     #[test]
@@ -653,3 +750,36 @@ mod tests {
         assert!(matches!(e, PenEffect::Blur(_)));
     }
 }
+
+#[cfg(test)]
+mod decoration_metadata_tests;
+
+#[cfg(test)]
+mod shadow_profile_tests {
+    use super::*;
+    #[test]
+    fn shadow_profile_is_optional_and_explicit_triangular_survives_serde() {
+        let source = r##"{"offsetX":0,"offsetY":1,"blur":8,"spread":0,"color":"#00000040"}"##;
+        let mut shadow: ShadowBody = serde_json::from_str(source).unwrap();
+        assert_eq!(shadow.blur_kernel, None);
+        assert!(!serde_json::to_string(&shadow)
+            .unwrap()
+            .contains("blurKernel"));
+        shadow.blur_kernel = Some(ShadowBlurKernel::Triangular);
+        let encoded = serde_json::to_string(&shadow).unwrap();
+        assert!(encoded.contains("triangular"));
+        assert_eq!(
+            serde_json::from_str::<ShadowBody>(&encoded).unwrap(),
+            shadow
+        );
+    }
+}
+
+#[cfg(test)]
+mod precision_tests;
+
+mod image_geometry;
+pub use image_geometry::{
+    ImageExtend, ImageFieldGeometry, ImageFieldUnits, ImagePatternGeometry, ImageRepeat,
+    ImageViewportFit, ImageViewportGeometry,
+};

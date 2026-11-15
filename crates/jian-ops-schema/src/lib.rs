@@ -27,6 +27,7 @@ pub mod promote;
 pub mod routes;
 pub mod screen_projection;
 pub mod semantics;
+pub mod serde_children;
 pub mod sizing;
 pub mod state;
 pub mod state_override;

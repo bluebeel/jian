@@ -53,17 +53,101 @@ function channels(packed) {
   ];
 }
 
+// One fixed shadow program per runtime; caller-controlled shader sources use
+// the existing independent drawShader path. Failed compilation is cached too.
+export class JianShadowKernel {
+  constructor(ck) { this.ck = ck; this.source = ''; this.effect = null; this.attempted = false; }
+  setSource(source) {
+    const value = String(source || '');
+    const bounded = value.length <= 32768 ? value : '';
+    if (bounded === this.source) return;
+    this.dispose(); this.source = bounded;
+  }
+  dispose() {
+    if (this.effect) this.effect.delete();
+    this.effect = null; this.attempted = false; this.source = '';
+  }
+  make(fields) {
+    if (!this.attempted) {
+      this.attempted = true;
+      try { this.effect = this.source ? this.ck.RuntimeEffect.Make(this.source) : null; }
+      catch (_) { this.effect = null; }
+    }
+    if (!this.effect) return null;
+    const data = new Float32Array(this.effect.getUniformFloatCount());
+    for (let i = 0; i < this.effect.getUniformCount(); i++) {
+      const info = this.effect.getUniform(i), values = fields[this.effect.getUniformName(i)];
+      if (!values || info.isInteger || values.length !== Number(info.columns) * Number(info.rows)) return null;
+      data.set(values, Number(info.slot));
+    }
+    return this.effect.makeShader(data);
+  }
+}
+
+// A canvas-space displacement is mapped back through the current local basis.
+export function jianShadowOffset(current, basis, dx, dy) {
+  if (!current || !basis || current.length !== 9 || basis.length !== 9) return [dx, dy];
+  if (![...current, ...basis, dx, dy].every(Number.isFinite)
+      || current[6] !== 0 || current[7] !== 0 || current[8] !== 1
+      || basis[6] !== 0 || basis[7] !== 0 || basis[8] !== 1) return [dx, dy];
+  if ([0, 1, 3, 4].every(i => current[i] === basis[i])) return [dx, dy];
+  const determinant = current[0] * current[4] - current[1] * current[3];
+  if (!Number.isFinite(determinant) || determinant === 0) return [dx, dy];
+  const x = basis[0] * dx + basis[1] * dy, y = basis[3] * dx + basis[4] * dy;
+  const result = [Math.fround((current[4] * x - current[1] * y) / determinant),
+    Math.fround((current[0] * y - current[3] * x) / determinant)];
+  return result.every(Number.isFinite) ? result : [dx, dy];
+}
+
+function jianFitShadowCorners(w,h,corners) {
+  const r=corners.map(v=>Math.max(0,v)); let scale=1;
+  for (const [sum,extent] of [[r[0]+r[1],w],[r[3]+r[2],w],[r[0]+r[3],h],[r[1]+r[2],h]]) {
+    if (sum>extent) scale=Math.min(scale,extent/sum);
+  }
+  return r.map(v=>Math.fround(v*scale));
+}
+export function jianDrawTriangularShadow(ck, canvas, kernel, rect, radii, shadow, basis, cornerKernel) {
+  if (shadow[8] !== 1 || !(shadow[2] > 0)) return false;
+  if (![...rect, ...radii, ...shadow].every(Number.isFinite)) return false;
+  const f = Math.fround, spread = shadow[3];
+  const [dx, dy] = jianShadowOffset(canvas.getTotalMatrix?.(), basis, shadow[0], shadow[1]);
+  const x = f(f(rect[0] - spread) + dx), y = f(f(rect[1] - spread) + dy);
+  const w = f(rect[2] + f(spread * 2)), h = f(rect[3] + f(spread * 2));
+  if (!(w > 0 && h > 0)) return true;
+  const radius = radii[0] <= 0 ? 0 : Math.min(Math.max(0, f(radii[0] + spread)), Math.min(w, h) * 0.5);
+  const uniform = radii.every(r=>r===radii[0]);
+  const corners = uniform ? radii : jianFitShadowCorners(rect[2],rect[3],radii)
+    .map(r=>r<=0 ? 0 : Math.max(0,f(r+spread)));
+  let shader = null, paint = null;
+  try {
+    const alpha = shadow[7];
+    shader = (uniform ? kernel : cornerKernel)?.make({ bounds: [x, y, f(x + w), f(y + h)], radius: [radius],radii:corners,
+      blur: [shadow[2]], inner: [0], tint: [f(shadow[4] * alpha), f(shadow[5] * alpha), f(shadow[6] * alpha), alpha] });
+    if (!shader) return false;
+    paint = new ck.Paint(); paint.setAntiAlias(false);
+    paint.setColor(ck.Color4f(1, 1, 1, 1)); paint.setShader(shader);
+    canvas.drawRect(ck.LTRBRect(f(x - shadow[2]), f(y - shadow[2]),
+      f(f(x + w) + shadow[2]), f(f(y + h) + shadow[2])), paint);
+    return true;
+  } catch (_) { return false; }
+  finally { if (paint) paint.delete(); if (shader) shader.delete(); }
+}
+
 class Runtime {
   constructor(ck) {
     this.ck = ck;
     this.fonts = new Map();
     this.fontMgr = null;
     this.coverage = new Map();
+    this.shadowKernel = new JianShadowKernel(ck);
+    this.cornerShadowKernel = new JianShadowKernel(ck);
     this.failNextSurface = false;
     this.disposed = false;
   }
 
   registeredFontCount() { return this.fonts.size; }
+  setShadowKernelSource(source) { this.shadowKernel.setSource(source); }
+  setCornerShadowKernelSource(source) { this.cornerShadowKernel.setSource(source); }
 
   dispose() {
     if (this.disposed) return;
@@ -75,6 +159,8 @@ class Runtime {
     }
     this.fonts.clear();
     this.coverage.clear();
+    this.shadowKernel.dispose();
+    this.cornerShadowKernel.dispose();
     this.ck = null;
   }
 
@@ -274,6 +360,7 @@ class Surface {
     this.canvas.clear(this.color(clear));
     this.canvas.save();
     if (dpr !== 1) this.canvas.scale(dpr, dpr);
+    this.shadowBasis = this.canvas.getTotalMatrix ? Array.from(this.canvas.getTotalMatrix()) : null;
   }
 
   endFrame() {
@@ -516,13 +603,18 @@ class Surface {
   }
 
   drawShadow(rect, radii, shadow) {
+    if (jianDrawTriangularShadow(this.ck, this.canvas, this.runtime.shadowKernel, rect, radii, shadow, this.shadowBasis,
+      this.runtime.cornerShadowKernel)) return;
     const spread = shadow[3];
+    const f=Math.fround;
+    const w=f(rect[2]+f(spread*2)),h=f(rect[3]+f(spread*2));
+    if (!(w>0 && h>0)) return;
+    const [dx,dy]=jianShadowOffset(this.canvas.getTotalMatrix?.(),this.shadowBasis,shadow[0],shadow[1]);
+    const corners=spread===0 ? radii : jianFitShadowCorners(rect[2],rect[3],radii)
+      .map(radius=>radius<=0 ? 0 : Math.max(0,f(radius+spread)));
     const path = this.rrect([
-      rect[0] + shadow[0] - spread,
-      rect[1] + shadow[1] - spread,
-      Math.max(0, rect[2] + spread * 2),
-      Math.max(0, rect[3] + spread * 2),
-    ], Array.from(radii, (radius) => Math.max(0, radius + spread)));
+      f(f(rect[0]-spread)+dx),f(f(rect[1]-spread)+dy),w,h,
+    ], corners);
     const paint = new this.ck.Paint();
     paint.setAntiAlias(true);
     paint.setColor(this.ck.Color4f(shadow[4], shadow[5], shadow[6], shadow[7]));

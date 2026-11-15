@@ -925,7 +925,9 @@ uniforms: { [key in string]?: ShaderUniformValue } | null, explain: string | nul
  */
 export type ShaderUniformValue = number | Array<number> | string;
 
-export type ShadowBody = { inner: boolean | null, visible: boolean | null, offsetX: number, offsetY: number, blur: number, spread: number, color: string, };
+export type ShadowBlurKernel = "gaussian" | "triangular";
+
+export type ShadowBody = { inner: boolean | null, visible: boolean | null, offsetX: number, offsetY: number, blur: number, blurKernel: ShadowBlurKernel | null, spread: number, color: string, };
 
 export type SidedThickness = { top: number | null, right: number | null, bottom: number | null, left: number | null, };
 

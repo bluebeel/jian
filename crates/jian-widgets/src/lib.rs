@@ -15,7 +15,9 @@ pub(crate) mod test_support;
 
 pub use geometry::{Color, Point2D, Rect};
 pub use painter::{
-    ImageAdjustments, ImageBlendMode, ImageDrawMode, Painter, TextBaselineRequest, TextLayout,
+    ImageAdjustments, ImageBlendMode, ImageDrawMode, ImagePaintOptions, ImagePaintThumbnail,
+    Painter, RoundRectShadowOptions, ShadowBlurKernel, TextBaselineRequest, TextDecorationRequest,
+    TextLayout,
 };
 pub use tokens::{Density, Tokens};
 
@@ -29,3 +31,11 @@ pub use tokens::{Density, Tokens};
 pub fn centered_text_baseline_y(rect: Rect, font_size: f32) -> f32 {
     rect.origin.y + rect.size.y / 2.0 + font_size * 0.35
 }
+
+mod stroke_paint;
+pub use stroke_paint::*;
+
+pub use jian_ops_schema::style::{
+    ImageExtend, ImageFieldGeometry, ImageFieldUnits, ImagePatternGeometry, ImageRepeat,
+    ImageViewportFit, ImageViewportGeometry,
+};

@@ -9,7 +9,14 @@ use crate::convert::to_sk_point;
 use jian_core::render::PathCommand;
 use skia_safe::{Path as SkPath, PathBuilder};
 
+#[path = "path_reuse.rs"]
+mod reuse;
+
 pub fn to_sk_path(commands: &[PathCommand]) -> SkPath {
+    reuse::get_or_build(commands, || build_sk_path(commands))
+}
+
+fn build_sk_path(commands: &[PathCommand]) -> SkPath {
     let mut builder = PathBuilder::new();
     for cmd in commands {
         match *cmd {

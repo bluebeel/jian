@@ -5,8 +5,10 @@
 //! - a flat tree index (`NodeTree`)
 //! - the active page (when present)
 
+pub(crate) mod layout_tree;
 pub mod loader;
 pub mod tree;
+pub use layout_tree::BorrowedNodeTree;
 
 pub use tree::{NodeData, NodeKey, NodeTree};
 

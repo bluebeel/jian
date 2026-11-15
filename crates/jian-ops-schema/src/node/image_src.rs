@@ -63,7 +63,15 @@ fn fnv1a_extend(hash: &mut u64, bytes: &[u8]) {
 #[derive(Debug, Clone)]
 pub struct ImageSrc(Arc<str>);
 
+impl Default for ImageSrc {
+    fn default() -> Self {
+        Self(Arc::from(""))
+    }
+}
 impl ImageSrc {
+    pub fn from_arc(value: Arc<str>) -> Self {
+        Self(value)
+    }
     /// Borrow the source as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0

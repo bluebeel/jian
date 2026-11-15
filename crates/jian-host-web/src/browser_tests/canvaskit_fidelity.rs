@@ -223,6 +223,9 @@ async fn direct_shadow_spread_outsets_and_insets_parallel_round_rects() {
         rect: rect(24.0, 24.0, 24.0, 24.0),
         radii: BorderRadii::uniform(8.0),
         shadow: ShadowSpec {
+            blur_kernel: Default::default(),
+            float_color: None,
+            silhouette: None,
             color: Color::rgb(255, 0, 0),
             dx: 0.0,
             dy: 0.0,
@@ -234,6 +237,9 @@ async fn direct_shadow_spread_outsets_and_insets_parallel_round_rects() {
         rect: rect(80.0, 24.0, 24.0, 24.0),
         radii: BorderRadii::uniform(8.0),
         shadow: ShadowSpec {
+            blur_kernel: Default::default(),
+            float_color: None,
+            silhouette: None,
             color: Color::rgb(0, 0, 255),
             dx: 0.0,
             dy: 0.0,
@@ -275,6 +281,9 @@ async fn direct_shadow_blur_radius_is_half_sigma() {
         rect: rect(24.0, 24.0, 24.0, 48.0),
         radii: BorderRadii::zero(),
         shadow: ShadowSpec {
+            blur_kernel: Default::default(),
+            float_color: None,
+            silhouette: None,
             color: Color::rgb(0, 0, 0),
             dx: 0.0,
             dy: 0.0,
